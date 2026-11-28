@@ -21,7 +21,7 @@ from agentworks.plugins.proxmox.platform import ProxmoxPlatform
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.vms import manager as vm_manager
 from tests.conftest import seed_vm_trust, stub_vm_ssh_identity
-from tests.vm_access_support import install_access_recorder
+from tests.vm_access_support import account_processes_stopped, install_access_recorder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,7 +41,7 @@ def _fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(agent_initializer, "create_agent_on_vm", lambda *a, **k: None)
     monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", lambda *a, **k: None)
     monkeypatch.setattr(vm_manager, "_is_tailscale_reachable", lambda host: True)
-    install_access_recorder(monkeypatch)
+    install_access_recorder(monkeypatch).answer = account_processes_stopped
 
 
 def _vm(db: Database, name: str, *, admin: JsonObject | None = None) -> None:

@@ -6,7 +6,7 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
@@ -17,6 +17,7 @@ from agentworks.cli._helpers import (
 from agentworks.machine_output import OutputFormat
 
 workspace_app = typer.Typer(
+    cls=CommandPathGroup,
     name="workspace",
     help="Manage workspaces.",
     no_args_is_help=True,

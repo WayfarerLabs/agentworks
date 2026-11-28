@@ -51,9 +51,10 @@ On named `session start` and `session restart`, omitted `--spec` retains the sto
 JSON replaces the complete layer, and `{}` clears it. An empty or whitespace-only argument is
 invalid JSON. Inspect `agw session describe NAME --output json` and preserve any desired fields in
 the replacement. Candidate validation precedes runtime observation and restart consent. Accepted
-desired state is saved under the VM-family guard and remains if subsequent runtime work fails;
-invalid input or cancelled consent leaves the old layer unchanged. `start` on a running session can
-save a replacement without replacing its runtime; use `restart` to apply it immediately.
+desired state is saved with the session's intent, under a brief lock of the session, and remains if
+subsequent runtime work fails; invalid input or cancelled consent leaves the old layer unchanged.
+`start` on a running session can save a replacement without replacing its runtime; use `restart` to
+apply it immediately.
 
 For compound `session create`, `--spec` applies to the new session. `--workspace-spec` is accepted
 only with `--new-workspace`, and `--agent-spec` only with `--new-agent`; each applies to that
@@ -685,11 +686,30 @@ targets produce a nonzero exit. Bounded final observations are not an uptime or 
 guarantee.
 
 Dry run performs no activation, repair, workload-secret preview/resolution, PID-evidence write,
-staging change, target write, or mutation-guard creation. Provider observation may need its ordinary
-credentials. Off-guest checks remain conditional on later activation. Mutating operations share a
-VM-family guard: secret prompts and console delete confirmation can keep a family busy, and brief
-hold admission can report busy even for live diagnostic access. A newly acquired admission guard
-does not span the interactive body.
+staging change, target write, or native lock. Provider observation may need its ordinary
+credentials. Off-guest checks remain conditional on later activation.
+
+Mutating operations lock what they change, at four levels: the VM, each workspace and account (an
+agent's or the admin's), and each session below its workspace and account, with consoles, grants and
+workspace directory trees locked too. An operation holds exclusive what it changes and shared
+everything above it, so it is refused by an operation that changes something it depends on (above,
+at or below it), while operations in unrelated workspaces, agents and sessions on one VM run
+together. A refused command fails at once, naming the operation that holds the lock, the entity it
+holds and for how long, for example
+``Error: session/build on VM 'dev' is blocked: `agw workspace rehome` has held workspace/api for 3m12s``;
+retry when that operation finishes. An older `agw` still running during an upgrade locks the whole
+VM and is reported without a name.
+
+Commands ask their confirmations and resolve their secrets before locking, then read again under the
+lock what they showed or used and refuse, asking you to run the command again, when it changed.
+Three keep a question under their lock, because it is about what the locked operation is doing:
+`vm recover`'s host-key confirmation, `vm rekey --wait-for-share`, and the workload and pane secrets
+of the runtime commands (the `reconcile` commands and `session` and `console` `start`, `restart` and
+`stop`), which hold only their targets. Each prints one line naming what it holds before it asks.
+Access commands (`vm shell`, `vm exec`, `agent shell`, `session attach`, `session logs`,
+`vm port-forward` and the like) take the VM shared only to admit their hold, never for their
+interactive body, so only a VM-wide operation (`vm stop`, `delete`, `rekey`, `recover`, `reinit`)
+refuses them; starting a stopped VM first still needs the VM briefly to itself.
 
 See [Desired runtime state and recovery](../docs/guides/desired-runtime-state.md) for adoption,
 worked recovery and retry, migration, and WSL2 stopped-intent access limits. Migration 39 preserves
@@ -1045,9 +1065,12 @@ already has a record is never changed; the report says `already current` or
 for that VM (`trust marker present`).
 
 Each VM gets one report line: `imported (N keys)`, `already current`, `no matching entry`,
-`trust marker present`, `conflicts with the stored key`, or `no tailnet address`. The command exits
-non-zero while any selected VM ends without a record, with `--all` as well. Every run then rewrites
-the managed SSH config entries, whatever it imported.
+`trust marker present`, `conflicts with the stored key`, `no tailnet address`,
+`malformed host key, nothing recorded`, or `busy` with the refusal naming what holds the VM. Each VM
+is imported under its exclusive lock, so a VM another command holds is reported busy and left as it
+was while the others carry on; run the import again for it once that command finishes. The command
+exits non-zero while any selected VM ends without a record, with `--all` as well. Every run then
+rewrites the managed SSH config entries, whatever it imported.
 
 For a VM with no matching entry, verify its host key fingerprints against its console or provider,
 gather the keys with `ssh-keyscan` into a file, and pass that file with `--known-hosts`. The scanned
@@ -1094,7 +1117,10 @@ the filter is an error, not an empty result.
 
 `workspace delete` requires `--force` if the workspace has sessions. Running sessions are killed
 during deletion. Its confirmation warns that workspace files, uncommitted changes, stashes and
-commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt.
+commits not pushed elsewhere will be lost. Pass `--yes` to skip the confirmation prompt. When the
+workspace's directory or its Linux group cannot be removed from the VM (a group already gone counts
+as removed), the delete fails with the workspace still recorded, so rerunning `workspace delete`
+retries the removal; `agw vm logs <vm>` has the failed command's output.
 
 There is deliberately no `workspace shell`: a shell rooted in a workspace is always _somebody's_
 shell. Use `agw vm shell <vm> --workspace <ws>` for an admin shell or
@@ -1143,8 +1169,20 @@ exec variant runs the command from the workspace directory. A workspace on a dif
 rejected with a `ValidationError`; a workspace the agent lacks access to raises `AuthorizationError`
 with a hint to run `agent grant-workspaces`.
 
+An agent's access to a workspace is a grant in the database plus membership in the workspace's Linux
+group. A command that drops the agent's last grant on a workspace (`agent revoke-workspaces`, or
+`session delete` of the agent's last session there) removes the membership first and drops the grant
+only once that succeeds. When the removal fails, the command fails with the grant (and the session)
+still recorded, and rerunning it retries the removal.
+
 `agent delete` requires `--force` if the agent has running sessions. Pass `--yes` to skip the
-confirmation prompt.
+confirmation prompt. It signals the agent's processes and waits up to 5 seconds for them to end
+before it removes the Linux user and its home with `userdel -r`. A process that is still running, or
+a removal that fails (a `userdel` hook that vetoes it, or a home that cannot be removed), fails the
+delete with the agent still recorded, so rerunning `agent delete` retries the removal; the error
+names the tool, and `agw vm logs <vm>` has its output. An account already gone from the VM counts as
+removed. When its home is still there (an earlier removal that failed on the home), the delete warns
+and names it: an agent of the same name cannot be created until you remove it.
 
 `agw agent shell` / `agw agent exec` are Agentworks-wrapped entry points; for raw SSH access to an
 agent (e.g. from VS Code Remote-SSH or `scp`), use the `awagent--<agent>` alias documented under
@@ -1171,7 +1209,11 @@ Entries are rebuilt declaratively from the database by `vm create`, `vm reinit`,
 commands keep the file in sync without manual intervention. Each entry's `IdentityFile` is
 `operator.ssh_private_key`, so after changing that key, `agw vm recover` or `agw vm reinit` (which
 install the new key on the VM) rebuild the file too. Run `agw config sync-ssh-config` to force a
-rebuild.
+rebuild. Rebuilds by commands running at once take turns, each reading the database after the one
+before it wrote. A rebuild that fails, one that waited more than 10 seconds for its turn included,
+only warns once the command's own changes are recorded; `agent create`, `agent reinit`,
+`session create` when it creates an agent, and `config sync-ssh-config` itself fail instead. Either
+way `agw config sync-ssh-config` brings the file up to date.
 
 Every entry also carries `HostKeyAlias`, `StrictHostKeyChecking yes`, `GlobalKnownHostsFile` (the
 VM's store file) and `UserKnownHostsFile` set to the null device, plus `UpdateHostKeys no` and
@@ -1596,13 +1638,15 @@ Codex conversation, while ordinary start/restart continue it once Codex has reco
 mints its own session ids, so the integration learns which conversation is this session's from Codex
 itself: every launch installs a small recorder script that Codex runs after each completed turn
 (through Codex's `notify` hook, so nothing is added to the conversation), and the next ordinary
-start/restart resumes what it recorded (a session archived with `codex archive` is deliberately
-treated as not resumable: the binding is dropped and the fallback below decides what happens
-instead, which is not always a fresh session). With nothing recorded yet, an ordinary start falls
-back to a single interactive Codex conversation recorded in this workspace directory, and on several
-it opens Codex's own session picker in the pane instead of guessing: picking one binds this session
-to it from its next turn, and esc starts a fresh conversation. `session create` and `--force-new`
-always launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
+start/restart resumes what it recorded when that rollout exists. If the recorded rollout is missing
+but the previously stored conversation is resumable, it keeps that stored binding. A session
+archived with `codex archive` is deliberately treated as not resumable. When neither binding is
+resumable, the binding is dropped and the fallback below decides what happens instead, which is not
+always a fresh session. With nothing recorded or stored yet, an ordinary start falls back to a
+single interactive Codex conversation recorded in this workspace directory, and on several it opens
+Codex's own session picker in the pane instead of guessing: picking one binds this session to it
+from its next turn, and esc starts a fresh conversation. `session create` and `--force-new` always
+launch a brand-new conversation and adopt nothing, so reusing a deleted session's name cannot
 silently pick its conversation back up; the fallback remains a heuristic, though, so if that
 conversation is the only one recorded in the workspace a later ordinary start can still adopt it,
 announced with the id it chose. It ships as the opt-in `codex` system plugin, disabled by default

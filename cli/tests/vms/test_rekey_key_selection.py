@@ -186,12 +186,13 @@ def test_cli_rejects_removed_ignore_env_option() -> None:
 
 
 @pytest.mark.parametrize("target", ["running", "on-demand"])
-def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
+def test_forced_prompt_rekey_prompts_unlocked_and_reuses_its_cache_for_racing_activation(
     db, make_config, resolve_counter, monkeypatch, target
 ) -> None:
     from agentworks.db import DesiredRuntimeState
     from agentworks.errors import StateError
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.secrets.resolver import Resolver
 
@@ -204,9 +205,9 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
     prompts = []
 
     def prompt(label, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pytest.fail("another mutation entered during the secret prompt")
-        prompts.append(label)
+        # The key is entered before the rekey takes its lock set.
+        with native_locks(db.path, vm_exclusive("box")):
+            prompts.append(label)
         return "fresh-key"
 
     monkeypatch.setattr(output, "prompt_secret", prompt)
@@ -216,7 +217,7 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
     monkeypatch.setattr(ProxmoxPlatform, "status", lambda *args: next(statuses))
 
     def await_tailnet(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pytest.fail("another mutation entered during the activation's wait")
         events.append("wait")
 
@@ -247,14 +248,15 @@ def test_forced_prompt_rekey_reuses_guard_and_cache_for_racing_activation(
     assert len(closed) == 1
     with pytest.raises(StateError):
         closed[0].get("tailscale-auth-key")
-    with native_mutation_guard(db.path, "box"):
+    with native_locks(db.path, vm_exclusive("box")):
         pass
 
 
-def test_forced_prompt_cancellation_preserves_intent_and_releases_guard(db, make_config, monkeypatch) -> None:
+def test_forced_prompt_cancellation_preserves_intent_and_holds_no_lock(db, make_config, monkeypatch) -> None:
     from agentworks.db import DesiredRuntimeState
     from agentworks.errors import StateError, UserAbort
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.secrets.resolver import Resolver
 
     config = make_config('[secret_config]\nsources = ["env-var"]\n')
@@ -265,8 +267,8 @@ def test_forced_prompt_cancellation_preserves_intent_and_releases_guard(db, make
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
     def prompt(label, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pytest.fail("another mutation entered during the secret prompt")
+        with native_locks(db.path, vm_exclusive("box")):
+            pass
         raise UserAbort("cancelled")
 
     monkeypatch.setattr(output, "prompt_secret", prompt)
@@ -287,5 +289,5 @@ def test_forced_prompt_cancellation_preserves_intent_and_releases_guard(db, make
     assert len(closed) == 1
     with pytest.raises(StateError):
         closed[0].get("tailscale-auth-key")
-    with native_mutation_guard(db.path, "box"):
+    with native_locks(db.path, vm_exclusive("box")):
         pass

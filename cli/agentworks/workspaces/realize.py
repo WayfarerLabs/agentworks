@@ -39,9 +39,9 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
     from agentworks.workspaces.templates import ResolvedTemplate
 
@@ -59,7 +59,7 @@ def realize_workspace(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet,
 ) -> Path:
     """Make workspace ``name`` real on ``vm``: create the on-VM
     directory from its RESOLVED template, generate the VS Code
@@ -78,6 +78,10 @@ def realize_workspace(
     mutations can leave reported residue; the caller's realization log never
     marks a half-made workspace complete. Native setup failures join
     ``setup_failures`` while the row and setup progress are committed.
+
+    Runs under the caller's ``held`` set, which must cover
+    :func:`workspace_create_request` and also locks the target tree; it
+    acquires nothing.
     """
     from agentworks.agents.grants import materialize_grant_all_agents, workspace_group
     from agentworks.vms.manager import operation_log
@@ -100,10 +104,15 @@ def realize_workspace(
         # it returns, including unique clone attempts. It preserves and reports
         # unconfirmed or occupied reservations. With workspace_path unset here,
         # this layer must not guess a path and remove that unexplained residue.
-        if workspace_path:
-            delete_vm_workspace(vm, config, workspace_path, workspace_group(name), logger=log)
-        if vscode_path:
-            vscode_path.unlink(missing_ok=True)
+        # The local stub goes whatever the on-VM removal does: that removal
+        # raises when it cannot finish, and the stub must not outlive the row
+        # this rollback never wrote.
+        try:
+            if workspace_path:
+                delete_vm_workspace(vm, config, workspace_path, workspace_group(name), logger=log)
+        finally:
+            if vscode_path:
+                vscode_path.unlink(missing_ok=True)
 
     def _safe_cleanup() -> None:
         # Rollback failures must not mask the original KI/exception. Surface
@@ -119,101 +128,101 @@ def realize_workspace(
             )
 
     from agentworks.harness_setup.lifecycle import require_prepared_setup
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.workspaces.locks import workspace_create_request
 
-    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
-        require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
-        # The log closes exactly once, AFTER any rollback requests have been
-        # logged. Closing earlier would write the "Finished" footer before the
-        # rollback section, making the log misleading.
-        with operation_log(
-            vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()
-        ) as log:
-            try:
-                output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
-                workspace_path = create_vm_workspace(vm, config, name, template, logger=log)
+    held.require(workspace_create_request(db, vm, name), database_path=db.path)
+    require_prepared_setup(db, "workspace", name, ("workspace",), () if setup_inputs is None else (setup_inputs,))
+    # The log closes exactly once, AFTER any rollback requests have been
+    # logged. Closing earlier would write the "Finished" footer before the
+    # rollback section, making the log misleading.
+    with operation_log(
+        vm.name, "workspace-create", redactions=tuple((setup_values or {}).values()) if setup_inputs else ()
+    ) as log:
+        try:
+            output.info(f"Creating workspace '{name}' on VM '{vm.name}' (template: {template.name})...")
+            workspace_path = create_vm_workspace(vm, config, name, template, logger=log)
 
-                native_setup = None
-                if setup_inputs is not None:
-                    from agentworks.harness_setup.lifecycle import apply_workspace_setup
+            native_setup = None
+            if setup_inputs is not None:
+                from agentworks.harness_setup.lifecycle import apply_workspace_setup
 
-                    native_setup = apply_workspace_setup(
-                        db,
-                        config,
-                        registry,
-                        inputs=setup_inputs,
-                        failures=setup_failures,
-                        vm=vm,
-                        root=workspace_path,
-                        linux_group=workspace_group(name),
-                        values=setup_values or {},
-                        logger=log,
-                        held=guard,
-                        operation="workspace-create",
-                    )
+                native_setup = apply_workspace_setup(
+                    db,
+                    config,
+                    registry,
+                    inputs=setup_inputs,
+                    failures=setup_failures,
+                    vm=vm,
+                    root=workspace_path,
+                    linux_group=workspace_group(name),
+                    values=setup_values or {},
+                    logger=log,
+                    held=held,
+                    operation="workspace-create",
+                )
 
-                vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
-                output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
+            vscode_path = generate_vscode_workspace(vm, config, name, workspace_path)
+            output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
 
-                from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
 
-                with db.transaction():
-                    refuse_orphan_creation_state(db, "workspace", name)
-                    db.insert_workspace(
-                        name,
-                        workspace_path=workspace_path,
-                        vm_name=vm.name,
-                        template=template.name,
-                        linux_group=workspace_group(name),
-                    )
-                    overlay_outcome = persist_creation_overlay(db, "workspace", name, overlay)
-                    if native_setup is not None:
-                        from agentworks.harness_setup.state import write_native_setup
+            with db.transaction():
+                refuse_orphan_creation_state(db, "workspace", name)
+                db.insert_workspace(
+                    name,
+                    workspace_path=workspace_path,
+                    vm_name=vm.name,
+                    template=template.name,
+                    linux_group=workspace_group(name),
+                )
+                overlay_outcome = persist_creation_overlay(db, "workspace", name, overlay)
+                if native_setup is not None:
+                    from agentworks.harness_setup.state import write_native_setup
 
-                        write_native_setup(db, "workspace", name, native_setup, operation="workspace-create")
-                        if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
-                            from agentworks.artifacts.state import write_capture
+                    write_native_setup(db, "workspace", name, native_setup, operation="workspace-create")
+                    if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
+                        from agentworks.artifacts.state import write_capture
 
-                            write_capture(
-                                db,
-                                "workspace",
-                                name,
-                                "workspace",
-                                setup_inputs.artifact_snapshot,
-                                operation="workspace-create",
-                            )
-            except KeyboardInterrupt:
-                output.warn(f"Cancelling workspace create '{name}'... rolling back.")
-                _safe_cleanup()
-                raise
-            except AgentworksError as e:
-                _safe_cleanup()
-                e.add_hint(f"Operation log: {log.display_path}")
-                raise
-            except Exception as e:
-                _safe_cleanup()
-                raise ExternalError(
-                    f"creating workspace: {e}",
-                    entity_kind="workspace",
-                    entity_name=name,
-                    hint=f"Operation log: {log.display_path}",
-                ) from e
+                        write_capture(
+                            db,
+                            "workspace",
+                            name,
+                            "workspace",
+                            setup_inputs.artifact_snapshot,
+                            operation="workspace-create",
+                        )
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling workspace create '{name}'... rolling back.")
+            _safe_cleanup()
+            raise
+        except AgentworksError as e:
+            _safe_cleanup()
+            e.add_hint(f"Operation log: {log.display_path}")
+            raise
+        except Exception as e:
+            _safe_cleanup()
+            raise ExternalError(
+                f"creating workspace: {e}",
+                entity_kind="workspace",
+                entity_name=name,
+                hint=f"Operation log: {log.display_path}",
+            ) from e
 
-            from agentworks.instance_specs import report_overlay_outcome
+        from agentworks.instance_specs import report_overlay_outcome
 
-            with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
-                # Materialize grant_all agents onto the new workspace: one explicit
-                # grant row plus the on-VM group membership per agent. Best-effort
-                # (per-agent failures warn, they do not abort); the invariant,
-                # ordering rationale, and KI handling live with the helper.
-                materialize_grant_all_agents(db, config, vm, name, logger=log)
+        with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+            # Materialize grant_all agents onto the new workspace: one explicit
+            # grant row plus the on-VM group membership per agent. Best-effort
+            # (per-agent failures warn, they do not abort); the invariant,
+            # ordering rationale, and KI handling live with the helper.
+            materialize_grant_all_agents(db, config, vm, name, logger=log)
 
-        from agentworks.harness_setup.outcomes import setup_completion_suffix
+    from agentworks.harness_setup.outcomes import setup_completion_suffix
 
-        setup_suffix = setup_completion_suffix(native_setup)
-        output.info(f"Workspace '{name}' created{setup_suffix}")
-        # vscode_path was assigned inside the try before the row insert;
-        # reaching here means the body completed without raising, so it is
-        # set. Assert for the type-checker.
-        assert vscode_path is not None
-        return vscode_path
+    setup_suffix = setup_completion_suffix(native_setup)
+    output.info(f"Workspace '{name}' created{setup_suffix}")
+    # vscode_path was assigned inside the try before the row insert;
+    # reaching here means the body completed without raising, so it is
+    # set. Assert for the type-checker.
+    assert vscode_path is not None
+    return vscode_path

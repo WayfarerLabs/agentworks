@@ -21,7 +21,14 @@ from typing import TYPE_CHECKING
 import agentworks.sessions.multi_console as _mc
 from agentworks import output
 from agentworks.db import ConsoleSessionRow
-from agentworks.errors import AlreadyExistsError, NotFoundError, StateError, UserAbort, ValidationError
+from agentworks.errors import (
+    AlreadyExistsError,
+    NotFoundError,
+    StateConflictError,
+    StateError,
+    UserAbort,
+    ValidationError,
+)
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 from agentworks.resources.access import named_console_template
 from agentworks.sessions.multi_console_layout import (
@@ -49,13 +56,15 @@ from .attach import (
     _session_linux_user,
 )
 from .runtime import validate_console_window
+from .secrets_env import _require_pane_secrets_resolved
 from .tmux_build import _resolve_workspace_path, _split_shell_pane
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from agentworks.config import Config
-    from agentworks.db import Database, ShellEntry
+    from agentworks.db import Database, SessionRow, ShellEntry
+    from agentworks.native_locks import Entity
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
 
@@ -113,10 +122,14 @@ def _probe_live_sync(
     """Probe the console's live tmux and, when it is running, check the agents of ``members``' shell panes.
 
     The probe is read-only. Only a running console has panes to park, so only
-    then does ``console_access`` check each agent's direct SSH, here, before
-    the edit resolves or records anything; a refused agent stops it with its
-    reinit hint. Otherwise the edit is recorded and the live sync stays best
-    effort (``_LiveSync.running``).
+    then does ``console_access`` check each agent's direct SSH; a refused
+    agent stops the edit with its reinit hint. Otherwise the edit is recorded
+    and the live sync stays best effort (``_LiveSync.running``).
+
+    An edit probes twice. Before its secrets resolve, so a refused agent
+    stops it before any prompt; and again under the lock, before it records
+    anything, because another command may start or stop the console while
+    the secrets resolve. The live sync acts on the second probe only.
     """
     live = _mc._live_access(db, config, vm_name)
     if live is None:
@@ -153,97 +166,128 @@ def create_console(
     definition inserts atomically after validation, secret resolution, and
     stale-runtime cleanup. A later build failure retains the durable
     definition. It is honestly stopped only when cleanup proves both runtime
-    names absent; otherwise its runtime state is indeterminate.
+    names absent; otherwise its runtime state is indeterminate. The VM's
+    gate and pane secrets resolve before its lock set is taken; under it
+    the console name, the VM row and each member session
+    are read again, and a change refuses before the first change.
 
     Live filtering (e.g. ``--all-running``) is resolved by the CLI layer into
     an explicit list of session names before calling this function.
     """
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.recheck import require_session_unchanged, require_vm_unchanged
 
-    with native_mutation_guard(db.path, vm_name) as held_native_guard:
-        validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
+    validate_name(name, max_length=MAX_FREEFORM_NAME_LENGTH)
 
-        if db.get_console(name) is not None:
-            raise AlreadyExistsError(
-                f"console '{name}' already exists",
-                entity_kind="console",
-                entity_name=name,
-            )
-        vm_row = db.get_vm(vm_name)
-        if vm_row is None:
-            raise NotFoundError(
-                f"VM '{vm_name}' not found",
-                entity_kind="vm",
-                entity_name=vm_name,
-            )
-
-        specs = [parse_session_spec(s) for s in session_specs]
-        _dedupe_specs(specs)
-
-        if fill_all:
-            explicit_names = {s.name for s in specs}
-            extras = sorted(s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names)
-            specs.extend(SessionSpec(name=n, shells=0) for n in extras)
-
-        if not specs and not add_admin_shell:
-            # Almost certainly a typo / misunderstanding rather than an empty console.
-            # fill_all (--all) and --all-running both go through specs expansion before
-            # reaching here, so an empty specs list means the expansion turned up
-            # nothing or no flags were passed at all.
-            if fill_all:
-                detail = f"VM '{vm_name}' has no sessions"
-            else:
-                detail = (
-                    "specify at least one session, pass --all (or --all-running for "
-                    "live sessions only), or pass --add-admin-shell"
-                )
-            raise ValidationError(
-                f"refusing to create empty console '{name}' ({detail})",
-                entity_kind="console",
-                entity_name=name,
-            )
-
-        from agentworks.bootstrap import load_request_registry
-        from agentworks.secrets.resolver import Resolver
-
-        definition = ConsoleDefinition(
-            name=name,
-            vm_name=vm_name,
-            admin_shell=add_admin_shell,
-            members=tuple(
-                ConsoleSessionRow(
-                    console_name=name,
-                    session_name=spec.name,
-                    position=position,
-                    shells=default_shells(spec.shells),
-                )
-                for position, spec in enumerate(specs)
-            ),
+    if db.get_console(name) is not None:
+        raise AlreadyExistsError(
+            f"console '{name}' already exists",
+            entity_kind="console",
+            entity_name=name,
         )
-        for member in definition.members:
-            validate_console_window(db, member, vm_row)
-        registry = load_request_registry(config, live_database=db)
-        output.info(f"Checking console '{name}' runtime...")
-        from contextlib import closing
+    vm_row = db.get_vm(vm_name)
+    if vm_row is None:
+        raise NotFoundError(
+            f"VM '{vm_name}' not found",
+            entity_kind="vm",
+            entity_name=vm_name,
+        )
 
-        with (
-            closing(Resolver(config, registry, interaction=interaction)) as resolver,
-            _active_console_vm(
-                db,
-                config,
-                vm_name,
-                registry=registry,
-                interaction=interaction,
-                resolver=resolver,
-                held_native_guard=held_native_guard,
-                targets=lambda vm: _mc._console_build_secret_targets(
-                    db, registry, console=definition, vm=vm, members=definition.members
-                ),
-            ) as (vm, admin),
-        ):
-            access = _console_pane_access(db, config, vm, admin, resolver=resolver, members=definition.members)
-            secret_values = resolver.values
-            try:
+    specs = [parse_session_spec(s) for s in session_specs]
+    _dedupe_specs(specs)
+
+    if fill_all:
+        explicit_names = {s.name for s in specs}
+        extras = sorted(s.name for s in _vm_sessions(db, vm_name) if s.name not in explicit_names)
+        specs.extend(SessionSpec(name=n, shells=0) for n in extras)
+
+    if not specs and not add_admin_shell:
+        # Almost certainly a typo / misunderstanding rather than an empty console.
+        # fill_all (--all) and --all-running both go through specs expansion before
+        # reaching here, so an empty specs list means the expansion turned up
+        # nothing or no flags were passed at all.
+        if fill_all:
+            detail = f"VM '{vm_name}' has no sessions"
+        else:
+            detail = (
+                "specify at least one session, pass --all (or --all-running for "
+                "live sessions only), or pass --add-admin-shell"
+            )
+        raise ValidationError(
+            f"refusing to create empty console '{name}' ({detail})",
+            entity_kind="console",
+            entity_name=name,
+        )
+
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.secrets.resolver import Resolver
+
+    definition = ConsoleDefinition(
+        name=name,
+        vm_name=vm_name,
+        admin_shell=add_admin_shell,
+        members=tuple(
+            ConsoleSessionRow(
+                console_name=name,
+                session_name=spec.name,
+                position=position,
+                shells=default_shells(spec.shells),
+            )
+            for position, spec in enumerate(specs)
+        ),
+    )
+    for member in definition.members:
+        validate_console_window(db, member, vm_row)
+    sessions_read = {member.session_name: db.get_session(member.session_name) for member in definition.members}
+    from agentworks.native_locks import LockRequest, console_entity, probe_locks
+
+    # The console is locked by name before its row exists, with its members shared.
+    create_request = LockRequest(
+        exclusive=(console_entity(vm_row.name, name, members=_session_entities(db, sessions_read)),)
+    )
+    probe_locks(db.path, create_request)
+    registry = load_request_registry(config, live_database=db)
+    output.info(f"Checking console '{name}' runtime...")
+    from contextlib import closing
+
+    with (
+        closing(Resolver(config, registry, interaction=interaction)) as resolver,
+        _active_console_vm(
+            db,
+            config,
+            vm_name,
+            registry=registry,
+            interaction=interaction,
+            resolver=resolver,
+            targets=lambda vm: _mc._console_build_secret_targets(
+                db, registry, console=definition, vm=vm, members=definition.members
+            ),
+        ) as (vm_node, admin),
+    ):
+        vm = vm_node.row
+        access = _console_pane_access(db, config, vm, admin, resolver=resolver, members=definition.members)
+        secret_values = resolver.values
+        try:
+            # Every secret is resolved: the console's set is taken before the first
+            # change, and what the definition was built from is read again.
+            with vm_node.locked(create_request):
+                if db.get_console(name) is not None:
+                    raise StateConflictError(
+                        f"console '{name}' was created since this command read it",
+                        entity_kind="console",
+                        entity_name=name,
+                        hint="Run the command again with another name.",
+                    )
+                require_vm_unchanged(db, vm)
+                for session_name, session_read in sessions_read.items():
+                    require_session_unchanged(db, session_name, session_read)
+                _require_pane_secrets_resolved(
+                    _mc._console_build_secret_targets(
+                        db, registry, console=definition, vm=vm, members=definition.members
+                    ),
+                    secret_values,
+                    console_name=name,
+                )
+                # Every new shell's environment composes from the rows as they are under the lock.
                 _mc._validate_console_build_values(
                     db,
                     registry,
@@ -297,8 +341,8 @@ def create_console(
                         ),
                     ) from exc
 
-            finally:
-                secret_values.clear()
+        finally:
+            secret_values.clear()
 
         extras_note = " + admin shell" if add_admin_shell else ""
         output.result(f"Console '{name}' created with {len(specs)} session(s){extras_note}.")
@@ -318,72 +362,102 @@ def add_sessions(
     *start_index* is the block's zero-based final session index. Existing
     members retain their relative order. The DB mutation is atomic; if the
     console's tmux session is live, the windows are also added immediately
-    (best-effort).
+    (best-effort). The added shells' secrets resolve before the console is
+    locked, with the added sessions shared; under the lock the console and
+    its VM are read again, a change refuses, the positions are derived from
+    the member list as read there, so a member another command added
+    meanwhile is kept, and the console's tmux is probed again for the live
+    sync.
     """
-    from ._helpers import guarded_console_selection
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.recheck import require_console_row_unchanged, require_session_unchanged, require_vm_unchanged
 
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        from agentworks.bootstrap import load_request_registry
+    from ._helpers import locked_console, probe_console
 
-        console = _require_console(db, console_name)
-        preflight_member_count = len(db.list_console_sessions(console_name))
-        preflight_index = preflight_member_count if start_index is None else start_index
-        if not 0 <= preflight_index <= preflight_member_count:
-            raise ValidationError(
-                f"session insertion index {preflight_index} is outside the valid range "
-                f"0..{preflight_member_count} for console '{console_name}'",
-                entity_kind="console",
-                entity_name=console_name,
-            )
-
-        specs = [parse_session_spec(s) for s in session_specs]
-        _dedupe_specs(specs)
-        vm_row = db.get_vm(console.vm_name)
-        if vm_row is None:
-            raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
-        # The members to record; the transaction below settles their positions.
-        new_members = tuple(
-            ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
-            for position, spec in enumerate(specs)
+    console = _require_console(db, console_name)
+    preflight_member_count = len(db.list_console_sessions(console_name))
+    preflight_index = preflight_member_count if start_index is None else start_index
+    if not 0 <= preflight_index <= preflight_member_count:
+        raise ValidationError(
+            f"session insertion index {preflight_index} is outside the valid range "
+            f"0..{preflight_member_count} for console '{console_name}'",
+            entity_kind="console",
+            entity_name=console_name,
         )
 
-        for member in new_members:
-            if db.get_console_session(console_name, member.session_name) is not None:
-                raise AlreadyExistsError(
-                    f"session '{member.session_name}' is already a member of console '{console_name}'",
-                    entity_kind="console-member",
-                    entity_name=member.session_name,
-                )
-            validate_console_window(db, member, vm_row)
+    specs = [parse_session_spec(s) for s in session_specs]
+    _dedupe_specs(specs)
+    vm_row = db.get_vm(console.vm_name)
+    if vm_row is None:
+        raise NotFoundError(f"VM '{console.vm_name}' not found", entity_kind="vm", entity_name=console.vm_name)
+    # The members to record; the transaction below settles their positions.
+    new_members = tuple(
+        ConsoleSessionRow(console_name, spec.name, position, default_shells(spec.shells))
+        for position, spec in enumerate(specs)
+    )
 
-        registry = load_request_registry(config, live_database=db)
-        sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
-
-        # Eager-prompting orchestration: when any spec carries shells > 0 the
-        # live-attach path below will open new shells via _add_session_window.
-        # Resolve every referenced secret BEFORE the DB write so a failure
-        # leaves no partial state. No platform instance participates in this
-        # command (the live sync is pure Tailscale, no platform ops), so this
-        # is the operation's ONE prompt session by construction: nothing to
-        # fold into a bind boundary. The resolve is skipped when no specs
-        # carry shells (the bare ``add-sessions s1 s2`` shape); the empty
-        # values dict below still feeds the live-attach path, whose windows
-        # then have no panes to compose env for.
-        secret_values: dict[str, str] = {}
-        new_shell_targets: list[SecretTarget] = []
-        for member in new_members:
-            new_shell_targets.extend(_mc._member_secret_targets(db, registry, vm=vm_row, member=member))
-        if new_shell_targets:
-            from agentworks.secrets import resolve_for_command
-
-            secret_values = resolve_for_command(
-                new_shell_targets,
-                config,
-                registry,
-                allow_transient_auto_declare=True,
-                interaction=interaction,
+    # The sessions the new windows are built for, as read before their secrets resolve.
+    sessions_read = {member.session_name: db.get_session(member.session_name) for member in new_members}
+    added = _session_entities(db, sessions_read)
+    probe_console(db, console_name, shared=added)
+    for member in new_members:
+        if db.get_console_session(console_name, member.session_name) is not None:
+            raise AlreadyExistsError(
+                f"session '{member.session_name}' is already a member of console '{console_name}'",
+                entity_kind="console-member",
+                entity_name=member.session_name,
             )
+        validate_console_window(db, member, vm_row)
 
+    registry = load_request_registry(config, live_database=db)
+    # A running console's pane agents are checked before any secret is asked for.
+    _probe_live_sync(db, config, console_name, console.vm_name, new_members)
+
+    # Eager-prompting orchestration: when any spec carries shells > 0 the
+    # live-attach path below will open new shells via _add_session_window.
+    # Resolve every referenced secret BEFORE the DB write so a failure
+    # leaves no partial state. No platform instance participates in this
+    # command (the live sync is pure Tailscale, no platform ops), so this
+    # is the operation's ONE prompt session by construction: nothing to
+    # fold into a bind boundary. The resolve is skipped when no specs
+    # carry shells (the bare ``add-sessions s1 s2`` shape); the empty
+    # values dict below still feeds the live-attach path, whose windows
+    # then have no panes to compose env for.
+    secret_values: dict[str, str] = {}
+    new_shell_targets: list[SecretTarget] = []
+    for member in new_members:
+        new_shell_targets.extend(_mc._member_secret_targets(db, registry, vm=vm_row, member=member))
+    if new_shell_targets:
+        from agentworks.secrets import resolve_for_command
+
+        secret_values = resolve_for_command(
+            new_shell_targets,
+            config,
+            registry,
+            allow_transient_auto_declare=True,
+            interaction=interaction,
+        )
+
+    # Every secret is resolved: the console and its VM are read again under its lock,
+    # and the transaction below derives positions from the members as they are now.
+    with locked_console(db, console_name, shared=added) as (_selected_console, _held):
+        require_console_row_unchanged(db, console)
+        require_vm_unchanged(db, vm_row)
+        for session_name, session_read in sessions_read.items():
+            require_session_unchanged(db, session_name, session_read)
+        # The console's tmux as it is now: one started or stopped while the secrets resolved is synced accordingly.
+        sync = _probe_live_sync(db, config, console_name, console.vm_name, new_members)
+        if sync.access is not None:
+            # The running console's new panes compose from the access's VM row and the rows read now.
+            _require_pane_secrets_resolved(
+                [
+                    target
+                    for member in new_members
+                    for target in _mc._member_secret_targets(db, registry, vm=sync.access.vm, member=member)
+                ],
+                secret_values,
+                console_name=console_name,
+            )
         with db.transaction():
             current_order = [member.session_name for member in db.list_console_sessions(console_name)]
             current_names = set(current_order)
@@ -459,12 +533,15 @@ def remove_sessions(
     console is removed. If that leaves the console with no configured sessions,
     offer to delete it (interactive) or report-but-keep it (``yes=True``), the
     same "console is now empty" treatment ``session delete`` gives a console
-    its cascade empties (issue #265).
+    its cascade empties (issue #265). Under the console's lock the console
+    and its members are read again, and a change refuses; the offer runs
+    once the lock is released.
     """
-    from ._helpers import guarded_console_selection
+    from agentworks.recheck import console_fields, require_unchanged
 
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        console = _require_console(db, console_name)
+    from ._helpers import locked_console
+
+    def require_members() -> None:
         for n in session_names:
             if db.get_console_session(console_name, n) is None:
                 raise NotFoundError(
@@ -472,6 +549,13 @@ def remove_sessions(
                     entity_kind="console-member",
                     entity_name=n,
                 )
+
+    _require_console(db, console_name)
+    require_members()
+    read = console_fields(db, console_name)
+    with locked_console(db, console_name) as (_selected_console, _held):
+        require_unchanged("console", console_name, read, console_fields(db, console_name))
+        console = _require_console(db, console_name)
         live = _mc._live_access(db, config, console.vm_name)
         with db.transaction():
             for n in session_names:
@@ -487,11 +571,11 @@ def remove_sessions(
                 # intercept this call path.
                 _mc.kill_session_windows(admin, pairs=[(console_name, n) for n in session_names])
 
-        # Offer/report AFTER the removal (and its best-effort live sync) settle.
-        # Routed through the package object so this shares the exact offer/report
-        # path ``session delete`` uses, and so tests monkeypatching
-        # ``multi_console.delete_console`` intercept the confirmed delete.
-        _mc.offer_delete_if_empty_consoles(db, config, [console_name], yes=yes, held_native_guard=held_native_guard)
+    # Offer/report AFTER the removal (and its best-effort live sync) settle and
+    # the lock is released. Routed through the package object so this shares
+    # the exact offer/report path ``session delete`` uses, and so tests
+    # monkeypatching ``multi_console.delete_console`` intercept the confirmed delete.
+    _mc.offer_delete_if_empty_consoles(db, config, [console_name], yes=yes)
 
 
 def reorder_sessions(
@@ -520,9 +604,9 @@ def reorder_sessions(
     Short-circuits with an info message and no DB / tmux work when the
     listed sessions are already in the requested order at the requested position.
     """
-    from ._helpers import guarded_console_selection
+    from ._helpers import locked_console
 
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
+    with locked_console(db, console_name) as (_selected_console, _held):
         console = _require_console(db, console_name)
 
         if to_back and start_index is not None:
@@ -606,19 +690,6 @@ def reorder_sessions(
             )
 
 
-def delete_console_record(db: Database, *, name: str) -> None:
-    """Delete the DB record for a console. Cascade handles its session list.
-
-    Tmux teardown is the caller's responsibility.
-    """
-    from ._helpers import guarded_console_selection
-
-    with guarded_console_selection(db, name) as (_selected_console, held_native_guard):
-        _require_console(db, name)
-        db.delete_console(name)
-        output.info(f"Console '{name}' deleted.")
-
-
 def _validate_cwd(cwd: str | None) -> None:
     """Reject working directories that escape the workspace root (absolute path or .. segments)."""
     if cwd is None:
@@ -629,6 +700,17 @@ def _validate_cwd(cwd: str | None) -> None:
         raise ValidationError(f"cwd '{cwd}' must be relative to the workspace root, not absolute")
     if ".." in cwd.split("/"):
         raise ValidationError(f"cwd '{cwd}' may not contain '..' segments")
+
+
+def _require_member(db: Database, console_name: str, session_name: str) -> ConsoleSessionRow:
+    member = db.get_console_session(console_name, session_name)
+    if member is None:
+        raise NotFoundError(
+            f"session '{session_name}' is not a member of console '{console_name}'",
+            entity_kind="console-member",
+            entity_name=session_name,
+        )
+    return member
 
 
 def add_shell(
@@ -642,65 +724,93 @@ def add_shell(
     interaction: TtyInteractionPolicy,
 ) -> None:
     """Append a single shell entry to a session's window in a console. If the
-    console is live, also splits the pane immediately (best-effort)."""
-    from ._helpers import guarded_console_selection
+    console is live, also splits the pane immediately (best-effort).
 
-    with guarded_console_selection(db, console_name) as (_selected_console, held_native_guard):
-        from agentworks.bootstrap import load_request_registry
+    The pane's secrets resolve before the console is locked; under the lock
+    the console and its VM are read again, a change refuses, the shell is
+    appended to the member's shell list as read there, and the console's
+    tmux is probed again for the live sync.
+    """
+    from agentworks.bootstrap import load_request_registry
+    from agentworks.recheck import require_console_row_unchanged, require_session_unchanged, require_vm_unchanged
 
-        _validate_cwd(cwd)
-        console = _require_console(db, console_name)
-        cs = db.get_console_session(console_name, session_name)
-        if cs is None:
-            raise NotFoundError(
-                f"session '{session_name}' is not a member of console '{console_name}'",
-                entity_kind="console-member",
-                entity_name=session_name,
+    from ._helpers import locked_console, probe_console
+
+    _validate_cwd(cwd)
+    console = _require_console(db, console_name)
+    cs = _require_member(db, console_name, session_name)
+
+    registry = load_request_registry(config, live_database=db)
+    new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
+    probe_console(db, console_name)
+    # A running console's pane agent is checked before any secret is asked for.
+    _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
+
+    # Eager-prompting orchestration: resolve any
+    # secrets referenced by this pane's env chain BEFORE the DB write +
+    # potential pane-split below. No platform instance participates in
+    # this command (the live sync is pure Tailscale, no platform ops),
+    # so this is the operation's ONE prompt session by construction.
+    # Non-interactive failures surface as
+    # SecretUnavailableError with no partial state to clean up. We
+    # always resolve (even when the console isn't live), since the
+    # operator typed add-shell expecting to use the new pane shortly.
+    # The pane's scope follows _pane_runs_as_admin, the rule the pane
+    # runs by, so the eager resolve matches what _resolve_pane_env will
+    # produce at pane-split time.
+    session_row = db.get_session(session_name)
+    vm_row = db.get_vm(console.vm_name)
+    secret_values: dict[str, str] = {}
+    # Who the pane runs as: the scope it resolves and the result it reports both follow it.
+    runs_as_admin = admin
+    if session_row is not None and vm_row is not None:
+        session_user = _session_linux_user(db, session_row, vm_row)
+        runs_as_admin = _pane_runs_as_admin(vm_row, session_user, admin_shell=admin)
+        pane_target = _mc._pane_secret_target(
+            db,
+            registry,
+            vm=vm_row,
+            session=session_row,
+            is_admin_pane=runs_as_admin,
+        )
+        if pane_target is not None:
+            from agentworks.secrets import resolve_for_command
+
+            secret_values = resolve_for_command(
+                [pane_target],
+                config,
+                registry,
+                allow_transient_auto_declare=True,
+                interaction=interaction,
             )
 
-        registry = load_request_registry(config, live_database=db)
-        new_shell: ShellEntry = {"cwd": cwd, "admin": admin}
+    # Every secret is resolved: the console, its VM and the member are read again under its lock.
+    with locked_console(db, console_name) as (_selected_console, _held):
+        require_console_row_unchanged(db, console)
+        if vm_row is not None:
+            require_vm_unchanged(db, vm_row)
+        require_session_unchanged(db, session_name, session_row)
+        # The shell list is the one read under the lock, so a concurrent append is kept.
+        cs = _require_member(db, console_name, session_name)
         new_shells = [*cs.shells, new_shell]
+        # The console's tmux as it is now: one started or stopped while the secret resolved is synced accordingly.
         sync = _probe_live_sync(db, config, console_name, console.vm_name, [replace(cs, shells=[new_shell])])
-
-        # Eager-prompting orchestration: resolve any
-        # secrets referenced by this pane's env chain BEFORE the DB write +
-        # potential pane-split below. No platform instance participates in
-        # this command (the live sync is pure Tailscale, no platform ops),
-        # so this is the operation's ONE prompt session by construction.
-        # Non-interactive failures surface as
-        # SecretUnavailableError with no partial state to clean up. We
-        # always resolve (even when the console isn't live), since the
-        # operator typed add-shell expecting to use the new pane shortly.
-        # The pane's scope follows _pane_runs_as_admin, the rule the pane
-        # runs by, so the eager resolve matches what _resolve_pane_env will
-        # produce at pane-split time.
-        session_row = db.get_session(session_name)
-        vm_row = db.get_vm(console.vm_name)
-        secret_values: dict[str, str] = {}
-        # Who the pane runs as: the scope it resolves and the result it reports both follow it.
-        runs_as_admin = admin
-        if session_row is not None and vm_row is not None:
-            session_user = _session_linux_user(db, session_row, vm_row)
-            runs_as_admin = _pane_runs_as_admin(vm_row, session_user, admin_shell=admin)
-            pane_target = _mc._pane_secret_target(
+        live_session = None if sync.access is None else db.get_session(session_name)
+        if sync.access is not None and live_session is not None:
+            # The running console's new pane composes from the access's VM row and the session read now.
+            live_vm = sync.access.vm
+            pane_now = _mc._pane_secret_target(
                 db,
                 registry,
-                vm=vm_row,
-                session=session_row,
-                is_admin_pane=runs_as_admin,
+                vm=live_vm,
+                session=live_session,
+                is_admin_pane=_pane_runs_as_admin(
+                    live_vm, _session_linux_user(db, live_session, live_vm), admin_shell=admin
+                ),
             )
-            if pane_target is not None:
-                from agentworks.secrets import resolve_for_command
-
-                secret_values = resolve_for_command(
-                    [pane_target],
-                    config,
-                    registry,
-                    allow_transient_auto_declare=True,
-                    interaction=interaction,
-                )
-
+            _require_pane_secrets_resolved(
+                [] if pane_now is None else [pane_now], secret_values, console_name=console_name
+            )
         db.update_console_shells(console_name, session_name, new_shells)
         user_tag = "admin" if runs_as_admin else "agent"
         output.result(
@@ -748,3 +858,15 @@ def add_shell(
             # here: the operator is mid-attach when they run `add-shell`; pulling
             # focus off their current pane would be jarring.
             _apply_layout(run, q_con, q_win, named_console_template(registry).tmux_layout)
+
+
+def _session_entities(db: Database, sessions: Mapping[str, SessionRow | None]) -> tuple[Entity, ...]:
+    """The entities of the sessions a console edit reads, refusing one that is gone."""
+    from agentworks.native_locks.rows import session_entity_for
+
+    entities = []
+    for name, session in sessions.items():
+        if session is None:
+            raise NotFoundError(f"session '{name}' not found", entity_kind="session", entity_name=name)
+        entities.append(session_entity_for(db, session))
+    return tuple(entities)

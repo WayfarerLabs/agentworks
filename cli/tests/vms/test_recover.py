@@ -153,7 +153,7 @@ def test_a_failed_initialization_warns_once(
     monkeypatch: pytest.MonkeyPatch,
     captured_output: CapturedOutput,
 ) -> None:
-    """Recover exists to repair such a VM, so it goes on, and the recheck under the guard does not warn again."""
+    """Recover exists to repair such a VM, so it goes on, and the recheck under the lock does not warn again."""
     _seed(db)
     db.update_vm_init_status("box", InitStatus.FAILED)
     guest = _guest(monkeypatch)
@@ -165,25 +165,25 @@ def test_a_failed_initialization_warns_once(
     assert [_is_repair(payload) for payload in guest.payloads] == [True, False]
 
 
-def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
+def test_a_vm_whose_provisioning_changed_before_the_lock_is_refused(
     db: Database,
     make_config,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The row read under the guard decides: a VM whose provisioning failed meanwhile is not repaired."""
-    from agentworks.harness_setup import locking
+    """The row read under the lock decides: a VM whose provisioning failed meanwhile is not repaired."""
+    from agentworks import native_locks as locking
 
     _seed(db)
     guest = _guest(monkeypatch)
-    real_guard = locking.native_mutation_guard
+    real_lock = locking.native_locks
 
     @contextlib.contextmanager
-    def guard_after_a_change(*args: object, **kwargs: object) -> Iterator[object]:
+    def lock_after_a_change(*args: object, **kwargs: object) -> Iterator[object]:
         db.update_vm_provisioning_status("box", ProvisioningStatus.FAILED)
-        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+        with real_lock(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_change)
+    monkeypatch.setattr(locking, "native_locks", lock_after_a_change)
 
     with pytest.raises(StateError) as raised:
         _recover(db, make_config())
@@ -192,35 +192,37 @@ def test_a_vm_whose_provisioning_changed_before_the_guard_is_refused(
     assert guest.payloads == []
 
 
-def test_a_vm_replaced_before_the_guard_is_refused(
+def test_a_vm_replaced_before_the_lock_is_refused(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A VM deleted and recreated under the same name before the guard is not the VM recover selected."""
-    from agentworks.harness_setup import locking
+    """A VM deleted and recreated under the same name before the lock is not the VM recover selected.
+
+    The secrets resolved before the lock; nothing reaches the guest."""
+    from agentworks import native_locks as locking
 
     _seed(db)
     guest = _guest(monkeypatch)
-    real_guard = locking.native_mutation_guard
+    real_lock = locking.native_locks
     replacements = []
 
     @contextlib.contextmanager
-    def guard_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
+    def lock_after_a_replacement(*args: object, **kwargs: object) -> Iterator[object]:
         db.delete_vm("box")
         _seed(db)
         replacements.append(db.get_vm("box"))
-        with real_guard(*args, **kwargs) as held:  # type: ignore[arg-type]
+        with real_lock(*args, **kwargs) as held:  # type: ignore[arg-type]
             yield held
 
-    monkeypatch.setattr(locking, "native_mutation_guard", guard_after_a_replacement)
+    monkeypatch.setattr(locking, "native_locks", lock_after_a_replacement)
 
     with pytest.raises(StateError) as raised:
         _recover(db, make_config())
 
     assert raised.value.entity_name == "box"
-    assert resolve_counter == []
+    assert len(resolve_counter) == 1
     assert guest.payloads == []
     assert db.get_vm("box") == replacements[0]
 

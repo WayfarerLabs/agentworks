@@ -15,13 +15,13 @@ from agentworks.artifacts.routing import setup_artifacts
 from agentworks.artifacts.state import capture_owner, write_capture
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.model import NativeSetupState
 from agentworks.harness_setup.state import write_native_setup
 from agentworks.schema import CapabilityConfig
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_unknown_route_metadata import _invoke, _registry
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="actual Linux guest file publication")
 
@@ -33,7 +33,7 @@ def test_capture_without_current_retirement_authority_holds_previous_inherited_f
     target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "agent")
     inputs = fixture.owners["agent"]
-    before = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="initial").records[0]
+    before = run_setup_held(db, fixture.registry, inputs, invocation, failures=[], operation="initial").records[0]
     snapshots = {file.path: Path(file.path).read_bytes() for file in before.artifact_files}
     assert snapshots
     # The VM now claims to have handled everything itself, without a deferral.
@@ -61,7 +61,7 @@ def test_capture_without_current_retirement_authority_holds_previous_inherited_f
         write_capture(db, "vm", "vm", "vm", empty, operation="reduced")
         fixture.registry.lookup("artifact-bundle", "vm-bundle").hints["vm-0"] = HintArtifactSpec(text="restored")
     assert setup_artifacts(db, fixture.registry, inputs, fixture.vm, "shell").retain_previous
-    current = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="retry").records[0]
+    current = run_setup_held(db, fixture.registry, inputs, invocation, failures=[], operation="retry").records[0]
     assert current.skipped and not current.complete
     assert {file.path: Path(file.path).read_bytes() for file in current.artifact_files} == snapshots
     assert inspect_artifacts(db, fixture.registry, agent_name="agent").owners[-1].integrations[0].status != "current"
@@ -87,7 +87,7 @@ def test_unknown_vm_holds_only_unclassified_origins_while_local_changes_converge
 
     monkeypatch.setattr(ShellIntegration, "user_init", apply)
     inputs = fixture.owners["agent"]
-    initial = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="initial").records[0]
+    initial = run_setup_held(db, fixture.registry, inputs, invocation, failures=[], operation="initial").records[0]
     vm_bytes = (target.home / "vm-0").read_bytes()
     hints = fixture.registry.lookup("artifact-bundle", "agent-bundle").hints
     hints["agent-0"] = HintArtifactSpec(text="local replacement")
@@ -102,7 +102,7 @@ def test_unknown_vm_holds_only_unclassified_origins_while_local_changes_converge
     write_native_setup(
         db, "vm", "vm", NativeSetupState(records=(old.model_copy(update={"artifact_inputs": None}),)), operation="fail"
     )
-    actual = run_setup(db, fixture.registry, retry, invocation, failures=[], operation="retry").records[0]
+    actual = run_setup_held(db, fixture.registry, retry, invocation, failures=[], operation="retry").records[0]
     assert (target.home / "vm-0").read_bytes() == vm_bytes
     assert (target.home / "agent-0").read_bytes() == b"local replacement"
     assert (target.home / "agent-1").exists() is previous_capture_replaced
@@ -113,9 +113,9 @@ def test_unknown_vm_holds_only_unclassified_origins_while_local_changes_converge
     # Once the upstream owner confirms its route, an ordinary agent reinit can
     # safely retire the obsolete file even if its local attribution was lost.
     fixture.save("vm", routes={"vm-0": "user"})
-    healed = run_setup(db, fixture.registry, retry, invocation, failures=[], operation="retry-after-vm-reinit").records[
-        0
-    ]
+    healed = run_setup_held(
+        db, fixture.registry, retry, invocation, failures=[], operation="retry-after-vm-reinit"
+    ).records[0]
     assert healed.complete and not healed.skipped
     assert not (target.home / "agent-1").exists()
 
@@ -129,7 +129,7 @@ def test_fresh_workspace_local_setup_is_not_permanently_failed_by_unknown_incomi
     target = LocalFixtureAccount(tmp_path / "guest")
     invocation = _invoke(fixture, target, "workspace")
     inputs = fixture.owners["workspace"]
-    result = run_setup(db, fixture.registry, inputs, invocation, failures=[], operation="create").records[0]
+    result = run_setup_held(db, fixture.registry, inputs, invocation, failures=[], operation="create").records[0]
     assert result.complete and not result.incomplete_reasons and not result.skipped
     before = inspect_artifacts(db, fixture.registry, workspace_name="workspace").owners[-1].integrations[0]
     assert before.status != "current"

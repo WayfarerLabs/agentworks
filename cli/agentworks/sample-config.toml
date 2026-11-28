@@ -109,7 +109,8 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # (the Codex harness integration and its `codex` CLI install-command), `grok`
 # (the Grok Build harness integration and its `grok` CLI install-command), `proxmox`
 # (the Proxmox VE VM platform), `azure` (the Azure VM platform, the Azure
-# DevOps git-credential provider, and the `az-cli` install-command), `aws`
+# DevOps git-credential provider, the Azure Key Vault secret backend, and the
+# `az-cli` install-command), `aws`
 # (the EC2 VM platform), and `gcp`
 # (the Google Compute Engine VM platform and optional guest `gcloud-cli` apt
 # package). Core still owns runners and executors, plus snap, mise, and
@@ -191,6 +192,10 @@ ssh_private_key = "~/.ssh/id_ed25519"        # required: used for SSH connection
 # `agw resource sample secret-source` prints the manifest shape;
 # `agw resource explain secret-backend/onepassword` documents its config
 # and mapping model.
+# For Azure Key Vault, enable `azure`, declare a source selecting
+# `spec.backend.name: azure-keyvault`, and add that source's name to the chain.
+# `agw resource explain secret-backend/azure-keyvault` documents its source
+# fields; `agw guide show concept-azure` links to Azure setup guidance.
 
 #[secret_config]
 #sources = ["env-var", "work-op", "prompt"]     # example; default is ["env-var", "prompt"].

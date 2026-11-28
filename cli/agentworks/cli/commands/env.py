@@ -6,10 +6,11 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy
 
 env_app = typer.Typer(
+    cls=CommandPathGroup,
     name="env",
     help="Inspect agentworks-managed env across resource scopes.",
     no_args_is_help=True,

@@ -13,6 +13,7 @@ from agentworks import output
 from agentworks.errors import NotFoundError
 from agentworks.execution.requests import CAPTURE_LIMIT_BYTES, CaptureOutput, Command
 from agentworks.execution.results import Completed
+from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.vms.initializer.steps import describe_failure, status
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.acls import ACL_DEADLINE, apply_workspace_acls
@@ -21,6 +22,7 @@ from agentworks.workspaces.guest import (
     REQUEST_FAILURES,
     ensure_group,
     open_parent_traversal,
+    remove_group_member,
     stored_workspace_path,
 )
 from agentworks.workspaces.manager._common import _workspace_scope
@@ -34,8 +36,11 @@ if TYPE_CHECKING:
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.steps import InitLog
 
-INSTALL_DEADLINE = 60
-"""Seconds the ``acl`` package install may take."""
+DPKG_LOCK_TIMEOUT = 120
+"""Seconds the ``acl`` install waits for the dpkg lock: another repair or an unattended upgrade may hold it."""
+
+INSTALL_DEADLINE = DPKG_LOCK_TIMEOUT + 60
+"""Seconds the ``acl`` package install may take, its wait for the dpkg lock included."""
 
 TREE_OUTPUT = CaptureOutput(64 * CAPTURE_LIMIT_BYTES)
 """What a step keeps of a recursive command's output: a line per entry, so a large tree's can pass 1 MiB.
@@ -100,7 +105,10 @@ def repair_workspace(
     its just-in-time values seeding the boundary resolver, and the
     whole SSH convergence body runs inside the held-active span. The
     not-found checks stay pre-boundary: a refusal costs zero prompts,
-    zero resolves, and zero gate events.
+    zero resolves, and zero gate events. The lock set (the workspace, the
+    admin's grant and one per granted agent) is probed before the gate and
+    taken after it and its secrets; the workspace row and its granted
+    agents are read again under it.
     """
     from agentworks.agents.manager import AGENT_PREFIX
     from agentworks.bootstrap import load_request_registry
@@ -128,6 +136,11 @@ def repair_workspace(
         )
     ws_path = stored_workspace_path(ws.workspace_path)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.workspaces.locks import workspace_grants, workspace_request
+
+    request = workspace_request(ws, *workspace_grants(db, vm, ws))
+    probe_locks(db.path, request)
     with (
         gated_vm_boundary(
             db,
@@ -136,9 +149,15 @@ def repair_workspace(
             vm,
             scope=_workspace_scope(db, vm, name),
             interaction=interaction,
-        ),
+        ) as (vm_node, _resolver, _ctx),
+        vm_node.locked(request),
         operation_log(vm.name, "workspace-repair") as log,
     ):
+        # The body runs on the row the gate admitted, the one compared here.
+        vm = vm_node.row
+        require_vm_unchanged(db, vm)
+        require_unchanged("workspace", name, workspace_fields(ws), workspace_fields(db.get_workspace(name)))
+        require_request_unchanged("workspace", name, request, workspace_request(ws, *workspace_grants(db, vm, ws)))
         admin = admin_access(vm, config, log)
         ws_group = ws.linux_group
         fixes = 0
@@ -155,7 +174,7 @@ def repair_workspace(
             if status(admin, Command(("which", "setfacl"), elevated=True)) != 0:
                 admin.run(
                     Command(
-                        ("apt-get", "install", "-y", "-qq", "acl"),
+                        ("apt-get", "-o", f"DPkg::Lock::Timeout={DPKG_LOCK_TIMEOUT}", "install", "-y", "-qq", "acl"),
                         elevated=True,
                         deadline=INSTALL_DEADLINE,
                         env={"DEBIAN_FRONTEND": "noninteractive"},
@@ -326,7 +345,7 @@ def repair_workspace(
             # Remove agents that shouldn't be there
             to_remove = current_members - granted_agents
             for user in sorted(to_remove):
-                status(admin, Command(("gpasswd", "-d", user, ws_group), elevated=True))
+                remove_group_member(admin, user, ws_group)
                 output.detail(f"Fixed: removed {user} from {ws_group}")
                 fixes += 1
 

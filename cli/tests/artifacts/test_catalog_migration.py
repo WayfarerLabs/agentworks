@@ -46,6 +46,7 @@ from tests.artifacts.test_catalog_retirement import _account, _persona
 from tests.artifacts.test_native_delivery import artifact, context, owned
 from tests.conftest import registry_with_shell
 from tests.native_setup_fixtures import LocalFixtureAccount, invocation
+from tests.nested_locks_support import run_setup_held
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
@@ -168,7 +169,7 @@ def test_vm_reinit_replaces_a_same_declaration_codex_catalog(db, monkeypatch, tm
     failures: list[SetupFailure] = []
 
     def reinit() -> SetupRecord:
-        return dispatch.run_setup(db, registry, prepared(), call, failures=failures, operation="vm-reinit").records[0]
+        return run_setup_held(db, registry, prepared(), call, failures=failures, operation="vm-reinit").records[0]
 
     if scenario in {"modified", "unowned", "legacy"}:
         after = reinit()

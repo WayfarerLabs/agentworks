@@ -1,4 +1,12 @@
-"""One invocation owns reconciliation guards, credentials, and result delivery."""
+"""One invocation owns its families' lock sets, credentials, and result delivery.
+
+The order, per family in VM name order: (a) read the selection, (b) probe
+each family's set, (d) record intent under a brief hold of that set, (e)
+prepare infrastructure unlocked (gate secrets, provider observation, a boot
+under a brief vm exclusive), then, once every family has finished (e), (f)
+acquire each family's set, held to the end, and (g) re-check it, before (h)
+the guest work, the workload boundary and execution.
+"""
 
 from __future__ import annotations
 
@@ -9,18 +17,21 @@ from agentworks.db import DatabaseDriverError
 from agentworks.errors import StateConflictError, UserAbort
 
 from ._execute import execute_deferred_work, final_observations, resolve_workload_boundary
+from ._families import acquire_final_sets, probe_families
 from ._models import RuntimeInvocation, render_results, require_success
 from ._prepare import prepare_guest_workloads, prepare_infrastructure, prepare_local_workloads
-from ._selection import acquire_families, seed_results
+from ._selection import read_families, seed_results
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.config import Config
     from agentworks.db import Database
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
 
-    from ._models import RuntimeSelection, SessionOperation
+    from ._models import RuntimeSelection, SessionDeclaration, SessionOperation
 
 
 def run_selected(
@@ -33,12 +44,17 @@ def run_selected(
     operation: SessionOperation | None = None,
     force: bool = False,
     authorized_running: frozenset[str] = frozenset(),
-    held_native_guard: NativeMutationGuard | None = None,
+    declarations: Mapping[str, SessionDeclaration] | None = None,
 ) -> None:
     from agentworks.bootstrap import load_request_registry
     from agentworks.secrets.resolver import Resolver
 
-    registry = load_request_registry(config, live_database=db)
+    declarations = declarations or {}
+    registry = load_request_registry(
+        config,
+        live_database=db,
+        pending_publishers=tuple(_publisher(declaration) for declaration in declarations.values()),
+    )
     resolver = Resolver(config, registry, interaction=interaction)
     with ExitStack() as stack:
         invocation = RuntimeInvocation(
@@ -53,13 +69,15 @@ def run_selected(
             operation=operation,
             force=force,
             authorized_running=authorized_running,
-            held_native_guard=held_native_guard,
+            declarations=declarations,
         )
         seed_results(invocation)
         try:
-            acquire_families(invocation)
+            read_families(invocation)
+            probe_families(invocation)
             prepare_local_workloads(invocation)
             prepare_infrastructure(invocation)
+            acquire_final_sets(invocation)
             prepare_guest_workloads(invocation)
             if resolve_workload_boundary(invocation):
                 execute_deferred_work(invocation)
@@ -81,3 +99,7 @@ def run_selected(
             raise
         finally:
             invocation.close()
+
+
+def _publisher(declaration: SessionDeclaration) -> Callable[[Registry], None]:
+    return lambda registry: registry.add_live(declaration.pending)

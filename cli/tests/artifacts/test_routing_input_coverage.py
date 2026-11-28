@@ -12,7 +12,6 @@ from agentworks.artifacts.state import capture_owner, write_capture
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.model import NativeSetupState
 from agentworks.harness_setup.readiness import evaluate_setup
 from agentworks.harness_setup.state import write_native_setup
@@ -20,6 +19,7 @@ from agentworks.origin import Origin
 from agentworks.vms.templates import ResolvedVMTemplate
 from tests.artifacts.test_routing import graph
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 
 
 @pytest.mark.parametrize("receiver", ["admin", "agent", "workspace"])
@@ -124,7 +124,9 @@ def test_receiver_acknowledges_known_inputs_without_certifying_incoming_routes(
         username="worker",
         home=str(runner.home),
     )
-    state = run_setup(db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init")
+    state = run_setup_held(
+        db, fixture.registry, fixture.owners["agent"], invocation, failures=[], operation="agent-init"
+    )
     (record,) = state.records
     assert record.complete and not record.incomplete_reasons
     assert not record.artifact_files and not record.skipped

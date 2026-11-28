@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -543,7 +544,11 @@ def test_only_a_refused_config_d_creation_is_reported_as_the_operators_to_fix(
     original = b"Host *\n    Foo bar\n"
     config.operator.ssh_config.write_bytes(original)
 
-    def mkdir_on_a_failing_mount(path: Path, *args: object, **kwargs: object) -> None:
+    real_mkdir = Path.mkdir
+
+    def mkdir_on_a_failing_mount(path: Path, *args: Any, **kwargs: Any) -> None:
+        if not path.is_relative_to(ssh_dir):
+            return real_mkdir(path, *args, **kwargs)
         raise OSError(error, os.strerror(error), str(path))
 
     monkeypatch.setattr(Path, "mkdir", mkdir_on_a_failing_mount)

@@ -4,13 +4,17 @@ Agentworks 0.20 reaches every VM through one new SSH connection layer, which car
 environment included, on the OpenSSH client's standard input and verifies every VM against a
 host-key store of its own instead of trusting whatever key it sees first. It also adds stored
 runtime intent for VMs, sessions and named consoles, and runs tmux clients aimed at an agent
-session's server as that agent. Third-party VM platform plugins move to vm-platform contract version
-2, and third-party harness integrations, Git credential providers and secret backends to new
-contract versions as well.
+session's server as that agent. Commands on unrelated parts of one VM now run together, each locking
+only what it changes ([Operations lock what they change](#operations-lock-what-they-change)).
+Third-party VM platform plugins move to vm-platform contract version 2, and third-party harness
+integrations, Git credential providers and secret backends to new contract versions as well.
 
 ## Upgrade steps
 
-Work through these in order; the sections after this list give the detail.
+Before you install 0.20, on the release you run now, move any native tool home that resolves outside
+its account's home inside that home, or retire that integration
+([Native tool homes stay inside the home](#native-tool-homes-stay-inside-the-home)). Then work
+through these in order; the sections after this list give the detail.
 
 1. **Migrate the database and keep its backup.** Run `agw vm list`, which reads only the
    `[database]` settings of your configuration. It migrates the state database, first offering a
@@ -857,6 +861,24 @@ new connection layer, so they need what [What these commands need](#what-these-c
   create's rollback included, with the exit status it would have had. Output redirected to a file
   that cannot be written, such as on a full disk, still fails the command.
 
+## Operations lock what they change
+
+Earlier releases let one command at a time change anything on a VM: a second command failed with
+`another operation is changing native state on this VM`, even when the two touched unrelated
+workspaces, agents or sessions, and access commands such as `vm shell` and `session attach` failed
+for as long as any long operation ran. This release locks the VM, each workspace, each account (an
+agent's or the admin's), each session, and the grants, consoles and workspace directory trees
+between them, so commands on unrelated parts of a VM run together. A command is refused only by an
+operation that changes something it depends on, and access commands only by a VM-wide one
+(`vm stop`, `delete`, `rekey`, `recover`, `reinit`). Refusals still fail at once, and now name the
+operation, the entity it holds and for how long (see the busy paragraph of the
+[command reference](../../cli/command-reference.md)).
+
+An older `agw` still running during the upgrade, in another terminal or by a script, still excludes
+and is excluded by this release on the same VM, so nothing races; its refusals of 0.20 commands keep
+the old message, and 0.20's refusals of it name no holder. Let such commands finish, or stop them,
+before relying on concurrent work.
+
 ## Workspace tmuxinator projects are removed
 
 Agentworks no longer generates a tmuxinator project for each workspace. No command has started one
@@ -894,6 +916,25 @@ retired by one small Python program per operation, with the content sent on its 
 staged in a temporary directory on the VM. Every such write on a VM, by any account, takes one lock,
 `/run/lock/agentworks-files.lock`; one that cannot take it within 30 seconds fails, saying that
 another Agentworks operation is writing files on the VM, and changes nothing.
+
+### Native tool homes stay inside the home
+
+Each account's Claude Code, Codex and Grok Build homes must now resolve inside that account's home,
+with links followed. That covers an override (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `GROK_HOME`) and a
+default home linked elsewhere, such as `~/.claude -> /srv/shared`. Setup for a home that resolves
+outside reports that integration's user setup incomplete, naming the home, and writes no settings,
+plugins, MCP entries or artifacts until the home moves inside. A link that stays inside the home
+(`~/.claude -> ~/.dotfiles/claude`) passes this check, though Agentworks still writes no file
+through a link. Sharing part of a tool home with another account, through a link or mount inside it,
+is unsupported.
+
+Before upgrading, on the earlier release, retire the integration from each affected account, which
+removes the plugins and marketplaces its setup installed in the outside home; then point the
+override at a directory inside the account's home, or replace the link, and set the integration up
+again. An account whose setup installed no plugins or marketplaces needs only the move. If you
+upgrade first, the plugin and marketplace records the earlier release kept under the outside
+directory are dropped with a warning naming it, without being reconciled: what they installed there
+stays, for you to remove by hand, and setup carries on with the current home.
 
 ## Third-party harness integrations, Git credential providers and secret backends
 

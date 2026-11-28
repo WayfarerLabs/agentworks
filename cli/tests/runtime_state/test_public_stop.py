@@ -12,7 +12,6 @@ from agentworks.db import (
     PID_STOPPED,
     DatabaseDriverError,
     DesiredRuntimeState,
-    SessionMode,
     SessionRuntimeSnapshot,
     SessionStatus,
     VMStatus,
@@ -21,25 +20,8 @@ from agentworks.errors import StateConflictError, StateError, UserAbort
 from agentworks.sessions import manager
 from agentworks.sessions.manager import _teardown
 from agentworks.vms.manager.boundary import require_vm_ssh_boundary
-from tests.runtime_state.test_composition import BOOT, REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
-
-
-def _running(db, statuses, name, vm, *, agent=False) -> None:
-    if agent:
-        agent_name = f"agent-{vm}"
-        if db.get_agent(agent_name) is None:
-            db.insert_agent(agent_name, vm, f"agt-{vm}")
-        socket = f"/run/agentworks/agent-tmux-sockets/agt-{vm}/{name}.sock"
-        db.insert_session(name, f"ws-{vm}", "default", SessionMode.AGENT, agent_name=agent_name, socket_path=socket)
-    else:
-        seed_session(db, name, vm)
-        socket = db.get_session(name).socket_path
-    ordinal = len(statuses) + 1
-    db.update_session_runtime(
-        name, socket_path=socket, pid=100 + ordinal, boot_id=BOOT, tmux_server_start_ticks=200 + ordinal
-    )
-    statuses[name] = SessionStatus.RUNNING
+from tests.runtime_state.runtime_support import BOOT, REFUSE, running_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_persistence(
@@ -49,7 +31,7 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
     seed_vm(db, "a")
     seed_vm(db, "b")
     for ordinal in range(12):
-        _running(db, statuses, f"s-{ordinal}", "a" if ordinal % 2 else "b", agent=bool(ordinal % 2))
+        running_session(db, statuses, f"s-{ordinal}", "a" if ordinal % 2 else "b", agent=bool(ordinal % 2))
     main_thread = threading.get_ident()
     created = []
 
@@ -112,7 +94,7 @@ def test_public_bulk_stops_overlap_with_private_admin_targets_and_main_thread_pe
 def test_filtered_one_bulk_uses_worker_while_named_stop_is_synchronous(db, make_config, runtime, monkeypatch, bulk):
     _, statuses, events = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "work", "box")
+    running_session(db, statuses, "work", "box")
     main_thread = threading.get_ident()
     workers = []
     synchronous = []
@@ -144,8 +126,8 @@ def test_filtered_one_bulk_uses_worker_while_named_stop_is_synchronous(db, make_
 def test_unknown_runtime_refuses_every_bulk_teardown_after_accepting_intent(db, make_config, runtime, monkeypatch):
     _, statuses, events = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "unknown", "box")
-    _running(db, statuses, "healthy", "box")
+    running_session(db, statuses, "unknown", "box")
+    running_session(db, statuses, "healthy", "box")
     statuses["unknown"] = SessionStatus.UNKNOWN
     before = {row.name: (row.pid, row.boot_id, row.tmux_server_start_ticks) for row in db.list_sessions()}
     monkeypatch.setattr(_teardown, "execute_dedicated_teardown", lambda *a: pytest.fail("bulk mutated"))
@@ -165,7 +147,7 @@ def test_bulk_completed_siblings_remain_completed_after_observer_cancellation(
     _, statuses, _ = runtime
     seed_vm(db, "box")
     for name in ["one", "two"]:
-        _running(db, statuses, name, "box")
+        running_session(db, statuses, name, "box")
     both_started = threading.Barrier(2)
 
     def execute(plan):
@@ -203,7 +185,7 @@ def test_off_parent_explicit_stop_never_opens_transport_repairs_observes_guest_o
 ):
     powers, statuses, events = runtime
     seed_vm(db, "box", target=DesiredRuntimeState.STOPPED)
-    _running(db, statuses, "work", "box")
+    running_session(db, statuses, "work", "box")
     powers["box"] = VMStatus.STOPPED
     before = SessionRuntimeSnapshot.from_session(db.get_session("work"))
     for method in ["_identity_access", "ensure_pids_batch", "observe_session_statuses", "_verified_session_access"]:
@@ -226,7 +208,7 @@ def test_real_public_acceptance_survives_failed_repair_before_status_or_teardown
 
     _, statuses, _ = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "work", "box")
+    running_session(db, statuses, "work", "box")
     from uuid import uuid4
 
     db.set_session_run_id("work", str(uuid4()))
@@ -263,7 +245,7 @@ def test_live_public_stop_without_host_trust_keeps_intent_and_refuses_guest_work
     from agentworks.execution import trust
 
     seed_vm(db, "box")
-    _running(db, runtime[1], "work", "box")
+    running_session(db, runtime[1], "work", "box")
     trust.remove("box")
     # The shared runtime fixture stubs this boundary for later lifecycle work.
     # Restore the production boundary to exercise the actual refusal here.
@@ -288,8 +270,8 @@ def test_named_stop_logs_each_vms_work_to_one_session_stop_log(db, make_config, 
 
     _, statuses, _ = runtime
     seed_vm(db, "box")
-    _running(db, statuses, "mine", "box")
-    _running(db, statuses, "theirs", "box", agent=True)
+    running_session(db, statuses, "mine", "box")
+    running_session(db, statuses, "theirs", "box", agent=True)
     opened = []
 
     @contextmanager

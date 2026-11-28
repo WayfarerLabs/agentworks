@@ -540,12 +540,13 @@ def test_shell_launch_receives_discovery_env_after_complete_publication(lifecycl
 
 
 def test_session_delete_refuses_while_vm_native_mutation_is_held(lifecycle):
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     lifecycle.restart()
     files = lifecycle.files()
     lifecycle.events.clear()
-    with native_mutation_guard(lifecycle.db.path, "vm1"), pytest.raises(NativeSetupBusyError):
+    with native_locks(lifecycle.db.path, vm_exclusive("vm1")), pytest.raises(NativeLockBusyError):
         manager.delete_session(
             lifecycle.db, lifecycle.config, name="s1", yes=True, interaction=TtyInteractionPolicy.REFUSE
         )
@@ -638,16 +639,18 @@ def test_upstream_placement_readiness_is_reported_without_blocking_restart(lifec
 
 
 @pytest.mark.parametrize(
-    "tool,integration,workaround,stage",
+    "tool,integration,workaround,stage,startup_status",
     [
-        ("claude", "claude-code", "session-skill-plugin", "conversation"),
-        ("claude", "claude-code", "session-skill-plugin", "native"),
-        ("codex", "codex", "session-home-skills", "native"),
-        ("grok", "grok-build", "session-home-skills", "native"),
+        ("claude", "claude-code", "session-skill-plugin", "conversation", 0),
+        ("claude", "claude-code", "session-skill-plugin", "conversation", 1),
+        ("claude", "claude-code", "session-skill-plugin", "conversation", 3),
+        ("claude", "claude-code", "session-skill-plugin", "native", 3),
+        ("codex", "codex", "session-home-skills", "native", 3),
+        ("grok", "grok-build", "session-home-skills", "native", 3),
     ],
 )
 def test_real_launch_probe_failure_preserves_existing_runtime_before_teardown(
-    lifecycle, monkeypatch, tool, integration, workaround, stage
+    lifecycle, monkeypatch, tool, integration, workaround, stage, startup_status
 ):
     from importlib import import_module
     from unittest.mock import Mock
@@ -672,8 +675,8 @@ def test_real_launch_probe_failure_preserves_existing_runtime_before_teardown(
 
     # The real probes run in the fixture's account, whose login startup fails,
     # so each fails with its own status rather than a fabricated exception. The
-    # status is one the conversation probe cannot read as "no transcript" (1).
-    (lifecycle.target.home / ".profile").write_text("exit 3\n")
+    # A startup exit of 0 or 1 is not the conversation probe's own answer.
+    (lifecycle.target.home / ".profile").write_text(f"exit {startup_status}\n")
     with pytest.raises(StateError) as failure:
         lifecycle.restart()
     assert (failure.value.entity_kind, failure.value.entity_name) == ("session", "s1")

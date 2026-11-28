@@ -373,18 +373,18 @@ with protected `AGENTWORKS_*` identity, plus a secret mapping restricted to that
 config references. VM/admin setup binds references to the live VM owner; agent and workspace setup
 bind to their respective live owners, including resources still pending during session creation.
 
-A VM-family mutation guard spans core provisioning, integration setup, and failed-create cleanup.
-Setup checkpoints record confirmed native claims through instance state. Fresh agent and workspace
-applied-state records remain buffered until the owner row and desired overlay commit atomically. A
-core creation failure cleans up the newly owned native resource. A valid setup facet's domain or
-transport failure instead preserves confirmed progress, records the current failure and lets
-independent facets and core bookkeeping finish. The command reports collected failures at its outer
-boundary with a failing exit status; newly created owners and their partial records remain. Shared
-persistence failures, cancellation, invalid activation preflight and unexpected internal errors
-still abort immediately. Fresh agent creation refuses an existing unowned Linux account or home
-before arming rollback. Existing agents retain the create-or-converge reinit path. VM/admin setup
-finishes before the final VM initialization and SSH-identity checkpoint, even with collected facet
-failures. See
+The owner's native lock (its VM, account or workspace, exclusive) spans core provisioning,
+integration setup, and failed-create cleanup. Setup checkpoints record confirmed native claims
+through instance state. Fresh agent and workspace applied-state records remain buffered until the
+owner row and desired overlay commit atomically. A core creation failure cleans up the newly owned
+native resource. A valid setup facet's domain or transport failure instead preserves confirmed
+progress, records the current failure and lets independent facets and core bookkeeping finish. The
+command reports collected failures at its outer boundary with a failing exit status; newly created
+owners and their partial records remain. Shared persistence failures, cancellation, invalid
+activation preflight and unexpected internal errors still abort immediately. Fresh agent creation
+refuses an existing unowned Linux account or home before arming rollback. Existing agents retain the
+create-or-converge reinit path. VM/admin setup finishes before the final VM initialization and
+SSH-identity checkpoint, even with collected facet failures. See
 [reconciling setup](../../../../docs/guides/harness-facets.md#inspecting-and-reconciling-setup) for
 inspection and repair.
 
@@ -743,7 +743,11 @@ probe with one named function returning
 the pane's shell will (mise activation, PATH fragments), so the probe answers for the environment
 the workload actually gets. Read its exit code through `require_completed`, which raises the typed
 execution error for a probe that may not have run, so only a completed probe is ever classified.
-Prefer shell-neutral inner commands (the Claude conversation probe's `find ... -print -quit` avoids
+Claude's transcript probe additionally requires an explicit shell-emitted presence result matching
+its exit status. A login or interactive startup file can exit 0 or 1 before the probe runs, so an
+exit code alone cannot establish presence or absence. The mandatory presence answer is independent
+of optional Python metadata detection, whose failure retains the existence-only policy. Prefer
+shell-neutral inner commands (the Claude conversation probe's `find ... -print -quit` avoids
 bash/zsh divergence on unmatched globs). `require_commands` applies harness-specific refusal policy
 over the neutral `check_required_commands` mechanism; reuse it rather than hand-rolling executable
 checks.
@@ -760,11 +764,11 @@ The session layers, with the shipped tests as templates:
   `command_check_access` from `cli/tests/vm_access_support.py`, an access whose command checks find
   every command except the ones a test names missing. The detection probe runs against a
   `RecordingVMAccess` from the same module, answering the probe's own builder
-  (`conversation_request` of the stored id) with an exit code through `respond`. Cover: config
-  vocabulary (accepts, unknown-field raises, wrong-type raises), both detection directions (probe
-  hit resumes, miss launches fresh, other exit raises), flag mapping and `extra_args` quoting, the
-  visible-decision line, state minting, and the integration's create, resume-only, resume-or-new,
-  and force-new behavior.
+  (`conversation_request` of the stored id) with its explicit presence result and matching exit code
+  through `respond`. Cover: config vocabulary (accepts, unknown-field raises, wrong-type raises),
+  both detection directions (probe hit resumes, miss launches fresh, other exit raises), flag
+  mapping and `extra_args` quoting, the visible-decision line, state minting, and the integration's
+  create, resume-only, resume-or-new, and force-new behavior.
 - **Generated shell text, executed:** `cli/tests/test_codex_integration.py`. An exit-code stub
   proves how a probe's ANSWER is classified; it cannot prove the probe asks the right question, and
   the interesting logic in a stateful integration often lives in the shell text itself (codex's

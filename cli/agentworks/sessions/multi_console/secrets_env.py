@@ -230,6 +230,29 @@ def _member_secret_targets(
     return targets
 
 
+def _require_pane_secrets_resolved(
+    targets: Sequence[SecretTarget],
+    values: Mapping[str, str],
+    *,
+    console_name: str,
+) -> None:
+    """Refuse the console's new panes when their environment needs a secret the command did not resolve.
+
+    ``targets`` are the panes' targets built under the command's lock set
+    from the same VM, session, workspace and agent rows the panes'
+    composition reads; see :func:`agentworks.secrets.require_targets_resolved`.
+    """
+    from agentworks.secrets import require_targets_resolved
+
+    require_targets_resolved(
+        targets,
+        values,
+        entity_kind="console",
+        entity_name=console_name,
+        message=f"the panes of console '{console_name}' now need a secret this command did not resolve",
+    )
+
+
 def _resolve_pane_env(
     db: Database,
     registry: Registry,

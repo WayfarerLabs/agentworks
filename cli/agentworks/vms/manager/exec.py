@@ -125,8 +125,11 @@ def shell_vm(
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-shell={vm.name}")],
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
+    ) as (vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
+
+        # The body runs on the row the gate admitted.
+        vm = vm_node.row
 
         ctx = ResourceContext(
             vm_name=vm.name,
@@ -197,7 +200,8 @@ def _shell_native(
         ),
     ):
         with guarded_terminal():
-            code = vm_node.site.platform.native_shell(vm, ops_ctx)
+            # The row the gate admitted.
+            code = vm_node.site.platform.native_shell(vm_node.row, ops_ctx)
         # After the guard: its exit pass leaves the alternate screen, which
         # would wipe anything written before it closes.
         if code == _STATUS_CONNECTION_MAY_HAVE_DROPPED:
@@ -282,8 +286,11 @@ def exec_vm(
         vm,
         targets=[_mgr._vm_secret_target(scopes, label=f"vm-exec={vm.name}")],
         interaction=interaction,
-    ) as (_vm_node, resolver, _ops_ctx):
+    ) as (vm_node, resolver, _ops_ctx):
         from agentworks.vms.sites import site_platform_name
+
+        # The body runs on the row the gate admitted.
+        vm = vm_node.row
 
         ctx = ResourceContext(
             vm_name=vm.name,

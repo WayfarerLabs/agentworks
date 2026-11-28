@@ -2,7 +2,7 @@
 
 Split out of `test_consoles.py` (see `.claude/rules/code-style.md` on file-size
 targets). Covers `create_console`, `add_sessions`/`remove_sessions`/
-`reorder_sessions`/`add_shell`, `delete_console_record`/`delete_console` (the
+`reorder_sessions`/`add_shell`, `delete_console` (including the
 DB-only path), and the `describe_console`/`list_consoles` output rendering.
 Shared seed helpers and stub Config classes live in
 `tests/_consoles_support.py`.
@@ -33,7 +33,6 @@ from agentworks.sessions.multi_console import (
     add_shell,
     console_description,
     delete_console,
-    delete_console_record,
     describe_console,
     list_consoles,
     remove_sessions,
@@ -695,15 +694,6 @@ def test_add_shell_rejects_bad_cwd(db: Database) -> None:
         add_shell(
             db, _StubConfig(), console_name="con", session_name="a", cwd="/etc", interaction=TtyInteractionPolicy.REFUSE
         )
-
-
-def test_delete_console_record(db: Database) -> None:
-    _seed_vm(db)
-    _seed_sessions(db, ["a"])
-    create_console(db, name="con", vm_name="vm1", session_specs=["a"])
-    delete_console_record(db, name="con")
-    assert db.get_console("con") is None
-    assert db._conn.execute("SELECT * FROM console_sessions").fetchall() == []
 
 
 def test_delete_console_db_only_when_vm_unreachable(

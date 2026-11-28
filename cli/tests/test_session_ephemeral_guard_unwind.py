@@ -13,7 +13,8 @@ from agentworks.agents.nodes import AgentTemplateNode, PendingAgentNode, pending
 from agentworks.agents.templates import ResolvedAgentTemplate
 from agentworks.db import Database
 from agentworks.errors import StateError, UserAbort
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.secrets.policy import TtyInteractionPolicy
 from agentworks.sessions.manager import create_session
 from agentworks.vms.nodes import LiveVMNode, VMSiteNode
@@ -55,8 +56,8 @@ def test_session_failure_unwinds_actual_realized_owners_through_real_delete_serv
 
     def remote_remove(kind: str) -> Callable[..., None]:
         def remove(*args, **kwargs) -> None:
-            with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "vm1"):
-                pytest.fail("owner deletion lost its enclosing family guard")
+            with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("vm1")):
+                pytest.fail("owner deletion lost its enclosing lock set")
             removed.append(kind)
 
         return remove
@@ -66,8 +67,8 @@ def test_session_failure_unwinds_actual_realized_owners_through_real_delete_serv
 
     def fail_launch(*args, **kwargs):
         assert db.get_agent("s1") is not None and db.get_workspace("s1") is not None
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "vm1"):
-            pytest.fail("session launch lost its enclosing family guard")
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("vm1")):
+            pytest.fail("session launch lost its enclosing lock set")
         raise failure
 
     monkeypatch.setattr("agentworks.sessions.manager._require_workspace", fail_launch)
@@ -87,7 +88,7 @@ def test_session_failure_unwinds_actual_realized_owners_through_real_delete_serv
         assert db.get_agent("s1") is None and db.get_workspace("s1") is None
         assert db.get_session("s1") is None
         assert db.get_workspace("ws1") is not None
-        with native_mutation_guard(db.path, "vm1"):
+        with native_locks(db.path, vm_exclusive("vm1")):
             pass
     finally:
         db.close()
@@ -112,13 +113,13 @@ def _pending(
 
 @pytest.mark.parametrize("kind", ["agent", "workspace"])
 @pytest.mark.parametrize("invalid", ["family", "database", "completed"])
-def test_real_nested_deletion_rejects_wrong_or_completed_guard_tokens(db, tmp_path, kind, invalid):
+def test_real_nested_deletion_rejects_wrong_or_completed_lock_tokens(db, tmp_path, kind, invalid):
     vm = db.insert_vm("vm1", "local", "vm1")
     config = SimpleNamespace(paths=SimpleNamespace(vscode_workspaces=tmp_path))
     path = tmp_path / "different.db" if invalid == "database" else db.path
     family = "other" if invalid == "family" else vm.name
-    with native_mutation_guard(path, family) as guard:
-        node = LiveVMNode(db, config, MagicMock(), vm, cast("VMSiteNode", MagicMock()), held_native_guard=guard)
+    with native_locks(path, vm_exclusive(family)) as lock:
+        node = LiveVMNode(db, config, MagicMock(), vm, cast("VMSiteNode", MagicMock()), held=lock)
         pending = _pending(db, config, "new", node, kind)
         if invalid != "completed":
             with pytest.raises(StateError) as rejected:
@@ -142,9 +143,9 @@ def test_pending_teardown_preserves_user_abort_from_actual_delete_path(db, tmp_p
     monkeypatch.setattr("agentworks.execution.oplog.OperationLogFile", lambda *a, **k: MagicMock())
     monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", abort)
     monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", abort)
-    with native_mutation_guard(db.path, vm.name) as guard:
+    with native_locks(db.path, vm_exclusive(vm.name)) as lock:
         site = VMSiteNode("local", cast("VMPlatform", _StubPlatform()), (), MagicMock())
-        node = LiveVMNode(db, config, MagicMock(), vm, site, held_native_guard=guard)
+        node = LiveVMNode(db, config, MagicMock(), vm, site, held=lock)
         pending = _pending(db, config, "new", node, kind)
         with pytest.raises(UserAbort) as caught:
             pending.teardown()

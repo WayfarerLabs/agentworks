@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 import typer
 
 from agentworks import output
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import (
     get_db,
     ordinary_tty_interaction_policy,
@@ -19,6 +19,7 @@ from agentworks.db import DesiredRuntimeState  # noqa: TC001 (Typer resolves ann
 from agentworks.machine_output import OutputFormat
 
 console_app = typer.Typer(
+    cls=CommandPathGroup,
     name="console",
     help="Manage named consoles (curated tmux views of VM sessions).",
     no_args_is_help=True,

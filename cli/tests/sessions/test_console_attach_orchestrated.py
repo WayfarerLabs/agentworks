@@ -226,7 +226,8 @@ def test_named_console_stopped_vm_gate_burst_seeds_the_boundary(
 
     assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
 
-    assert events == ["status", "status", "start", "tailscale"]
+    # The last observation is the boot's own, under its brief vm exclusive.
+    assert events == ["status", "status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert target.attaches() == [(Admin(), ATTACH)]
 
@@ -307,7 +308,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
         db, config, console_name="c1", session_name="s1", interaction=TtyInteractionPolicy.REFUSE
     )
 
-    assert events == ["status", "status", "start", "tailscale"]  # the gate ran
+    # The gate ran; the last observation is the boot's own, under its brief vm exclusive.
+    assert events == ["status", "status", "status", "start", "tailscale"]
     assert resolve_counter == [["proxmox-token"]]
     assert any("has-session -t '=aw-console-c1'" in c for c in commands)
     assert any("list-windows -t '=aw-console-c1'" in c for c in commands)
@@ -321,7 +323,8 @@ def test_restore_session_stopped_vm_drives_the_real_gated_composition(
 def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     db, make_config, target, monkeypatch, resolve_counter, status
 ):
-    from agentworks.harness_setup.locking import native_mutation_guard
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     config = make_config()
     _seed_vm(db)
@@ -339,7 +342,7 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     attach = admin.attach
 
     def unlocked_attach(request, **kwargs):
-        with native_mutation_guard(db.path, "box"):
+        with native_locks(db.path, vm_exclusive("box")):
             return attach(request, **kwargs)
 
     admin.attach = unlocked_attach
@@ -353,3 +356,78 @@ def test_console_attach_with_stopped_parent_intent_is_live_diagnostics_only(
     assert resolve_counter == [["proxmox-token"]]
     assert db.get_vm("box") == before_vm
     assert db.get_console("c1") == before_console
+
+
+def test_named_console_attach_resolves_its_gate_secret_with_nothing_locked(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The gate secret resolves before any lock; the start that needs it runs under a brief vm exclusive."""
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    events: list[str] = []
+    _stop_the_vm(monkeypatch, events)
+    resolve_gate = Resolver.resolve_gate
+    locked: list[bool] = []
+
+    def held() -> bool:
+        try:
+            with native_locks(db.path, vm_exclusive("box")):
+                return False
+        except NativeLockBusyError:
+            return True
+
+    def resolve_checking(self: Resolver, name: str) -> str:
+        locked.append(held())
+        return resolve_gate(self, name)
+
+    monkeypatch.setattr(Resolver, "resolve_gate", resolve_checking)
+    monkeypatch.setattr(ProxmoxPlatform, "start", lambda self, row, ctx: locked.append(held()))
+
+    assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    assert locked == [False, True]
+
+
+def test_named_console_attach_reaches_the_address_the_hold_admitted(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _Guest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rekey or recover that re-addresses the VM while the gate secret resolves is the address attach uses."""
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_named_console(db)
+    _reachable(monkeypatch, True)
+    monkeypatch.setattr(ProxmoxPlatform, "status", lambda self, row, ctx: VMStatus.RUNNING)
+    monkeypatch.setattr(vm_manager, "_await_tailnet", lambda *a, **kw: None)
+    resolve_gate = Resolver.resolve_gate
+
+    def resolve_then_readdress(self: Resolver, name: str) -> str:
+        value = resolve_gate(self, name)
+        db.update_vm_tailscale("box", "100.64.0.77")
+        return value
+
+    monkeypatch.setattr(Resolver, "resolve_gate", resolve_then_readdress)
+    record = target.recorder.vm_access
+    reached: list[str | None] = []
+
+    def vm_access(vm: object, *args: object, **kwargs: object) -> object:
+        reached.append(getattr(vm, "tailscale_host", None))
+        return record(vm, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("agentworks.execution.vm_access", vm_access)
+
+    assert multi_console.attach_console(db, config, name="c1", interaction=TtyInteractionPolicy.REFUSE) == 0
+
+    assert reached[-1:] == ["100.64.0.77"]

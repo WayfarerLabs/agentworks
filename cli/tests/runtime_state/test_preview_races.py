@@ -7,8 +7,8 @@ from agentworks.errors import StateError
 from agentworks.runtime_state import reconcile_vm
 from agentworks.runtime_state._models import Outcome
 from agentworks.sessions import manager
-from tests.runtime_state.test_composition import REFUSE, seed_session, seed_vm
-from tests.runtime_state.test_composition import runtime as runtime
+from tests.runtime_state.runtime_support import REFUSE, seed_session, seed_vm
+from tests.runtime_state.runtime_support import runtime as runtime
 
 
 @pytest.mark.parametrize("race_window", ["candidate", "reader"])

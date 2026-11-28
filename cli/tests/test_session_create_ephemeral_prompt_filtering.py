@@ -33,12 +33,12 @@ __all__ = ["_non_interactive", "_stub_build_registry"]
 
 
 def test_workspace_prompt_filters_by_vm_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With ``--vm vm-A`` set, the workspace chooser only shows
-    workspaces on vm-A. Workspaces on other VMs are filtered out so the
+    """With ``--vm vm-a`` set, the workspace chooser only shows
+    workspaces on vm-a. Workspaces on other VMs are filtered out so the
     operator can't pick one that the cross-check would reject."""
     from agentworks.sessions.manager import create_session
 
-    db = _seed_two_vms(tmp_path)  # vm-A has ws-A; vm-B has ws-B
+    db = _seed_two_vms(tmp_path)  # vm-a has ws-a; vm-b has ws-b
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
@@ -60,25 +60,25 @@ def test_workspace_prompt_filters_by_vm_flag(tmp_path: Path, monkeypatch: pytest
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            vm_name="vm-A",  # pins VM upfront
+            vm_name="vm-a",  # pins VM upfront
             admin=True,
             interaction=TtyInteractionPolicy.REFUSE,
         )
     # Exactly one choose call: the workspace prompt.
     assert len(captured_choose) == 1
     _msg, opts = captured_choose[0]
-    # The chooser saw only ws-A + [Create new], not ws-B.
-    assert any("ws-A" in o for o in opts)
-    assert not any("ws-B" in o for o in opts)
+    # The chooser saw only ws-a + [Create new], not ws-b.
+    assert any("ws-a" in o for o in opts)
+    assert not any("ws-b" in o for o in opts)
     assert opts[-1] == "[Create new workspace]"
     # And the operator got told why the list is short.
-    assert any("Only showing workspaces on VM 'vm-A'" in m for m in info_messages)
+    assert any("Only showing workspaces on VM 'vm-a'" in m for m in info_messages)
     db.close()
 
 
 def test_workspace_prompt_filters_by_existing_agent_vm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """With ``--agent agt-A`` (on vm-A) set, the workspace chooser
-    filters to workspaces on vm-A even when ``--vm`` was not passed.
+    """With ``--agent agt-a`` (on vm-a) set, the workspace chooser
+    filters to workspaces on vm-a even when ``--vm`` was not passed.
     The agent's VM is the anchor."""
     from agentworks.sessions.manager import create_session
 
@@ -104,13 +104,13 @@ def test_workspace_prompt_filters_by_existing_agent_vm(tmp_path: Path, monkeypat
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            agent="agt-A",  # agt-A lives on vm-A
+            agent="agt-a",  # agt-a lives on vm-a
             interaction=TtyInteractionPolicy.REFUSE,
         )
     opts = captured_choose[0]
-    assert any("ws-A" in o for o in opts)
-    assert not any("ws-B" in o for o in opts)
-    assert any("Only showing workspaces on VM 'vm-A'" in m for m in info_messages)
+    assert any("ws-a" in o for o in opts)
+    assert not any("ws-b" in o for o in opts)
+    assert any("Only showing workspaces on VM 'vm-a'" in m for m in info_messages)
     db.close()
 
 
@@ -120,7 +120,7 @@ def test_mode_prompt_filters_by_resolved_vm_with_info_line(tmp_path: Path, monke
     being omitted."""
     from agentworks.sessions.manager import create_session
 
-    db = _seed_two_vms(tmp_path)  # agt-A on vm-A, agt-B on vm-B
+    db = _seed_two_vms(tmp_path)  # agt-a on vm-a, agt-b on vm-b
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
@@ -141,23 +141,23 @@ def test_mode_prompt_filters_by_resolved_vm_with_info_line(tmp_path: Path, monke
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            workspace="ws-A",  # pins VM to vm-A
+            workspace="ws-a",  # pins VM to vm-a
             # No mode flag → mode prompt fires.
             interaction=TtyInteractionPolicy.REFUSE,
         )
     opts = captured_choose[0]
     assert opts[0] == "admin"
-    assert any("agt-A" in o for o in opts)
-    assert not any("agt-B" in o for o in opts)
+    assert any("agt-a" in o for o in opts)
+    assert not any("agt-b" in o for o in opts)
     assert opts[-1] == "[Create new agent]"
-    assert any("Only showing agents on VM 'vm-A'" in m for m in info_messages)
+    assert any("Only showing agents on VM 'vm-a'" in m for m in info_messages)
     db.close()
 
 
 def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``--vm vm-A --agent agt-B`` (where agt-B lives on vm-B) is
+    """``--vm vm-a --agent agt-b`` (where agt-b lives on vm-b) is
     internally inconsistent; the service has to catch this before any
     prompt fires (no point asking for a workspace when we already know
     the command is impossible)."""
@@ -177,8 +177,8 @@ def test_vm_and_existing_agent_mismatch_fails_before_workspace_prompt(
             db,
             config,  # type: ignore[arg-type]
             name="s1",
-            vm_name="vm-A",
-            agent="agt-B",  # lives on vm-B
+            vm_name="vm-a",
+            agent="agt-b",  # lives on vm-b
             interaction=TtyInteractionPolicy.REFUSE,
         )
     db.close()
@@ -192,7 +192,7 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, m
     from agentworks.sessions import manager as session_manager
     from agentworks.sessions.manager import create_session
 
-    db = _seed_two_vms(tmp_path)  # agt-A on vm-A, agt-B on vm-B
+    db = _seed_two_vms(tmp_path)  # agt-a on vm-a, agt-b on vm-b
     config = SimpleNamespace(session=SimpleNamespace(history_limit=50000))
 
     monkeypatch.setattr(output, "is_interactive", lambda: True)
@@ -201,8 +201,8 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, m
 
     def _choose_spy(msg: str, opts: list[str]) -> int:
         captured_choose.append((msg, list(opts)))
-        # The only chooser call should be the mode prompt; pick agt-A
-        # (index 1: 0=admin, 1=agt-A, 2=agt-B, 3=[Create new agent]).
+        # The only chooser call should be the mode prompt; pick agt-a
+        # (index 1: 0=admin, 1=agt-a, 2=agt-b, 3=[Create new agent]).
         return 1
 
     monkeypatch.setattr(output, "choose", _choose_spy)
@@ -232,8 +232,8 @@ def test_mode_prompt_picks_existing_agent_pins_vm_no_vm_prompt(tmp_path: Path, m
     assert msg == "Run session as:"
     # The agent labels should include the VM since the prompt was
     # cross-VM.
-    assert any("agt-A" in o and "vm: vm-A" in o for o in opts)
-    assert any("agt-B" in o and "vm: vm-B" in o for o in opts)
+    assert any("agt-a" in o and "vm: vm-a" in o for o in opts)
+    assert any("agt-b" in o and "vm: vm-b" in o for o in opts)
     db.close()
 
 
@@ -249,7 +249,7 @@ def test_mode_prompt_picks_admin_then_vm_prompt_fires(tmp_path: Path, monkeypatc
     monkeypatch.setattr(output, "is_interactive", lambda: True)
 
     # First chooser call: mode prompt → admin (index 0).
-    # Second chooser call: VM prompt → pick vm-A (index 0).
+    # Second chooser call: VM prompt → pick vm-a (index 0).
     call_count = [0]
 
     def _choose_spy(msg: str, opts: list[str]) -> int:
@@ -259,7 +259,7 @@ def test_mode_prompt_picks_admin_then_vm_prompt_fires(tmp_path: Path, monkeypatc
             return 0  # admin
         if call_count[0] == 2:
             assert msg == "Select a VM:"
-            return 0  # vm-A
+            return 0  # vm-a
         raise AssertionError(f"unexpected third chooser call: {msg}")
 
     monkeypatch.setattr(output, "choose", _choose_spy)

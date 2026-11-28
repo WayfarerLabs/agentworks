@@ -9,15 +9,26 @@ from typing import TYPE_CHECKING, Literal
 from agentworks import output
 from agentworks.errors import AgentworksError, StateError
 from agentworks.harness_setup.outcomes import sanitize_setup_diagnostic
+from agentworks.intent_restore import restore_command, restore_wording, while_recorded
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
     from contextlib import ExitStack
 
     from agentworks.capabilities.harness_integration import HarnessLaunchIntent
     from agentworks.config import Config
-    from agentworks.db import ConsoleRow, Database, DesiredRuntimeState, SessionRow, SessionStatus, VMRow, VMStatus
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.db import (
+        ConsoleRow,
+        Database,
+        DesiredOverlayRecord,
+        DesiredRuntimeState,
+        SessionRow,
+        SessionStatus,
+        VMRow,
+        VMStatus,
+    )
     from agentworks.resources import Registry
+    from agentworks.resources.live import LiveResource
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import PreparedSessionLaunch, PreparedSessionStop, SessionLaunchDefinition
@@ -40,6 +51,22 @@ class Outcome(StrEnum):
     BLOCKED = "blocked"
 
 
+@dataclass(frozen=True)
+class SessionDeclaration:
+    """A replacement declaration a session's intent is accepted with (``session start --spec``'s layer).
+
+    ``pending`` is the session as the declaration publishes it; the
+    invocation's registry carries it in place of the stored layer, which may
+    be one this release cannot read. ``accept`` replaces the stored layer
+    under the family's intent set, given the status observed before it,
+    and refuses if that or the session is not what the declaring command
+    confirmed.
+    """
+
+    pending: LiveResource
+    accept: Callable[[SessionStatus], None]
+
+
 @dataclass(frozen=True, kw_only=True)
 class RuntimeResult:
     """One outcome with the source of its current observation, independent of earlier work."""
@@ -53,6 +80,9 @@ class RuntimeResult:
     outcome: Outcome = Outcome.UNCHANGED
     reason: str | None = None
     target_known: bool = True
+    restore_intent: tuple[str, ...] | None = None
+    """For a target refused after this invocation recorded its new intent: the command that restores the
+    intent it replaced, or ``()`` when that intent has no public form. ``None`` when no intent was recorded."""
 
 
 @dataclass(frozen=True)
@@ -78,8 +108,8 @@ class RuntimeInvocation:
     force: bool = False
     intent: HarnessLaunchIntent
     authorized_running: frozenset[str] = frozenset()
-    held_native_guard: NativeMutationGuard | None = None
-    guards: dict[str, NativeMutationGuard] = field(default_factory=dict)
+    declarations: Mapping[str, SessionDeclaration] = field(default_factory=dict)
+    """Per session, a declaration to accept with its intent."""
     vms: dict[str, VMRow] = field(default_factory=dict)
     sessions: dict[str, SessionRow] = field(default_factory=dict)
     consoles: dict[str, ConsoleRow] = field(default_factory=dict)
@@ -92,6 +122,11 @@ class RuntimeInvocation:
     console_stops: dict[str, PreparedConsoleStop] = field(default_factory=dict)
     results: dict[ResourceKey, RuntimeResult] = field(default_factory=dict)
     accepted_changes: set[str] = field(default_factory=set)
+    replaced_intents: dict[str, DesiredRuntimeState | None] = field(default_factory=dict)
+    """Per session whose intent this invocation changed, the intent it replaced."""
+    accepted_overlays: dict[str, DesiredOverlayRecord | None] = field(default_factory=dict)
+    """Per session, the desired overlay its launch definition was built from, or for one with no definition the
+    overlay intent acceptance left; the final set compares it."""
     completed: set[ResourceKey] = field(default_factory=set)
     failed_families: set[str] = field(default_factory=set)
     values: dict[str, str] = field(default_factory=dict)
@@ -135,6 +170,23 @@ class RuntimeInvocation:
         reason = sanitize_setup_diagnostic(detail, redactions=self.redactions)[:500]
         self.record(kind, name, outcome=Outcome.BLOCKED if blocked else Outcome.FAILED, reason=reason)
 
+    def refuse(self, kind: Kind, name: str, error: Exception) -> None:
+        """Block a target whose lock was refused; one whose recorded intent still stands says how to undo it.
+
+        ``sessions`` holds each accepted target as its intent write left it,
+        so the words are given only while that session, not a same-name
+        replacement, is stored with that intent.
+        """
+        self.fail(kind, name, error, blocked=True)
+        if kind == "session" and name in self.replaced_intents:
+            restore = while_recorded(
+                restore_command("session", name, self.replaced_intents[name]),
+                recorded=self.sessions[name],
+                stored=self.db.get_session(name),
+            )
+            if restore is not None:
+                self.results[(kind, name)] = replace(self.results[(kind, name)], restore_intent=restore)
+
     def unavailable(self, kind: Kind, name: str) -> bool:
         return self.results[(kind, name)].outcome in {Outcome.BLOCKED, Outcome.FAILED}
 
@@ -167,6 +219,8 @@ def render_results(results: tuple[RuntimeResult, ...], *, dry_run: bool = False)
             if result.observation_from_parent
             else ""
         )
+        if result.restore_intent is not None:
+            reason += f"; {restore_wording(result.restore_intent)}"
         output.result(
             f"{result.kind} '{result.name}': {outcome} "
             f"({result.action}; desired {target}; observed {observed}{qualification}){reason}"

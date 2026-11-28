@@ -8,11 +8,12 @@ from typing import Annotated, Literal, cast
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.guide.agent_mode import GuideMode, select_guide_mode
 from agentworks.guide.service import list_guide_topics, render_guide
 
 guide_app = typer.Typer(
+    cls=CommandPathGroup,
     name="guide",
     help="Show static, package-owned Agentworks guidance.",
     invoke_without_command=True,

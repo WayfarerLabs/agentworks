@@ -10,11 +10,11 @@ from agentworks.errors import ConnectivityError, NotFoundError, StateError, Vali
 from agentworks.naming import MAX_FREEFORM_NAME_LENGTH, validate_name
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from agentworks.config import Config
     from agentworks.db import ConsoleRow, Database, SessionRow, ShellEntry
-    from agentworks.harness_setup.locking import NativeMutationGuard
+    from agentworks.native_locks import Entity, LockRequest, NativeLockSet
 
 TMUX_PREFIX = "aw-console-"
 TMUX_STAGING_PREFIX = "aw-console-build+"
@@ -218,23 +218,43 @@ def _shell_summary(shells: list[ShellEntry]) -> str:
     return f"{len(shells)} shell(s): " + ", ".join(parts)
 
 
-@contextmanager
-def guarded_console_selection(
-    db: Database,
-    name: str,
-    *,
-    held_native_guard: NativeMutationGuard | None = None,
-) -> Iterator[tuple[ConsoleRow, NativeMutationGuard]]:
-    """Select a definition under its family guard, refusing a changed parent."""
-    from agentworks.harness_setup.locking import native_mutation_guard
+def console_request(db: Database, console: ConsoleRow, *, shared: Sequence[Entity] = ()) -> LockRequest:
+    """The console exclusive, its member sessions and their parents shared, and ``shared`` beside them."""
+    from agentworks.native_locks import LockRequest
+    from agentworks.native_locks.rows import console_entity_for
 
-    parent_name = _require_console(db, name).vm_name
-    with native_mutation_guard(db.path, parent_name, held=held_native_guard) as guard:
+    return LockRequest(exclusive=(console_entity_for(db, console),), shared=tuple(shared))
+
+
+def probe_console(db: Database, name: str, *, shared: Sequence[Entity] = ()) -> None:
+    """Probe ``name``'s console request, so a conflict refuses before any prompt or boot."""
+    from agentworks.native_locks import probe_locks
+
+    probe_locks(db.path, console_request(db, _require_console(db, name), shared=shared))
+
+
+@contextmanager
+def locked_console(
+    db: Database, name: str, *, shared: Sequence[Entity] = ()
+) -> Iterator[tuple[ConsoleRow, NativeLockSet]]:
+    """Select a console under its exclusive lock (:func:`console_request`), refusing a changed parent or membership.
+
+    Under the set the console is read again and its request rebuilt, so a
+    member another command added or removed since the console was read
+    refuses rather than being acted on without its lock.
+    """
+    from agentworks.native_locks import native_locks
+    from agentworks.recheck import require_request_unchanged
+
+    selected = _require_console(db, name)
+    request = console_request(db, selected, shared=shared)
+    with native_locks(db.path, request) as lock_set:
         console = _require_console(db, name)
-        if console.vm_name != parent_name:
+        if console.vm_name != selected.vm_name:
             raise StateError(
                 f"console '{name}' changed VM while selecting it",
                 entity_kind="console",
                 entity_name=name,
             )
-        yield console, guard
+        require_request_unchanged("console", name, request, console_request(db, console, shared=shared))
+        yield console, lock_set

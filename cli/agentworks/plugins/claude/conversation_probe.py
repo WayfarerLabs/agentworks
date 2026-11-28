@@ -149,14 +149,17 @@ print('\nAGW_CLAUDE_CONVERSATION=' + json.dumps({
 """
 
 _FIND_FAILED_EXIT = 6  # find itself failed (not a mere no-match): raise
+_TRANSCRIPT_RESULT = "AGW_CLAUDE_TRANSCRIPT="
 
 
 def conversation_request(sid: str, *, detect: bool = True, environment: Mapping[str, str] | None = None) -> Script:
-    """The probe for ``sid``: exit 0 when its transcript exists, 1 when not, 6 when ``find`` failed.
+    """Answer transcript existence explicitly, with exit 0 for present, 1 for absent, 6 for a failed find.
 
     It runs in the launch target's login and interactive shell, the
     environment the pane gets, with ``environment`` added, so
     ``CLAUDE_CONFIG_DIR`` resolves as the pane's Claude resolves it. Its
+    transcript result is emitted by the shell, independently of Python, so a
+    startup-file exit cannot masquerade as a presence answer. Optional
     detection metadata is the last ``AGW_CLAUDE_CONVERSATION=`` line on
     stdout, written only when that shell finds a ``python3``.
     """
@@ -168,7 +171,8 @@ def conversation_request(sid: str, *, detect: bool = True, environment: Mapping[
         f'[ -n "$out" ] || [ "$rc" -eq 0 ] || exit {_FIND_FAILED_EXIT}; fi; '
         'exists=0; [ -z "$out" ] || exists=1; '
         f'if command -v python3 >/dev/null 2>&1; then {program} "$out" {shlex.quote(sid)} '
-        f'{"1" if detect else "0"}; fi; [ "$exists" -eq 1 ]'
+        f"{'1' if detect else '0'}; fi; "
+        f'printf "\\n{_TRANSCRIPT_RESULT}%s\\n" "$exists"; [ "$exists" -eq 1 ]'
     )
     return Script(inner, Shell.USER_DEFAULT, login=True, interactive=True, env=dict(environment or {}))
 
@@ -184,10 +188,10 @@ def probe_conversation(
     """Probe exact stored UUID addressing in one login-shell round trip.
 
     Transcript existence failures raise: a probe that may not have run raises
-    its typed execution error, and any exit but 0 or 1 (the 6 of a failed
-    ``find``, or a status from a startup file that exits or fails before the
-    probe's own command) raises :class:`StateError`, since guessing "fresh"
-    would launch ``--session-id`` with a UUID Claude already holds. Optional
+    its typed execution error. A transcript answer requires both the shell's
+    explicit result and its matching exit status; a startup exit alone raises
+    :class:`StateError`, since guessing "fresh" would launch ``--session-id``
+    with a UUID Claude already holds. Optional
     metadata detection fails soft, including a target without Python 3,
     preserving the existing resume boundary. No Claude process runs here and
     no transcript content leaves the target.
@@ -203,9 +207,11 @@ def probe_conversation(
     except AgentworksError as error:
         redactor.sanitize_error(error)
         raise
-    if status not in (0, 1):
+    lines = result.stdout.decode("utf-8", "replace").splitlines()
+    answers = [line for line in lines if line.startswith(_TRANSCRIPT_RESULT)]
+    if status not in (0, 1) or answers != [f"{_TRANSCRIPT_RESULT}{int(status == 0)}"]:
         raise StateError(
-            f"could not probe for the Claude transcript (exit {status}); refusing to guess resume-vs-launch.",
+            f"Claude transcript probe returned no valid answer (exit {status}); refusing to guess resume-vs-launch.",
             hint=(
                 "Check that the Claude projects directory ($CLAUDE_CONFIG_DIR/projects, by default "
                 "~/.claude/projects) is readable by the launch user, then retry."
@@ -214,7 +220,6 @@ def probe_conversation(
                 "completion without exiting or failing, then retry."
             ),
         )
-    lines = result.stdout.decode("utf-8", "replace").splitlines()
     exists = status == 0
     fallback = ConversationProbe(exists)
     try:

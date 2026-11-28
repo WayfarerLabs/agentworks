@@ -149,7 +149,12 @@ def test_logger_only_secret_is_removed_from_setup_probe_diagnostics(
     (invocation,) = invocations
     access = RecordingVMAccess([], Admin())
     # The native layout observation answers first; the discovery probe then fails, quoting the secret.
-    layout = {"root": "/home/worker/.claude", "mcp_path": "/home/worker/.claude.json"}
+    layout = {
+        "root": "/home/worker/.claude",
+        "mcp_path": "/home/worker/.claude.json",
+        "physical_root": "/home/worker/.claude",
+        "physical_home": "/home/worker",
+    }
     access.run_outcomes = [
         Result(Completed(0), b"\nAGW_NATIVE_USER_LAYOUT=" + json.dumps(layout).encode()),
         Result(Completed(1), b"", ("\x1b[" + secret + " " + path).encode()),

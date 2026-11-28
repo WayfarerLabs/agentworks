@@ -1,6 +1,5 @@
 """Parent deletion ignores native applied-state records while excluding concurrent setup."""
 
-from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -11,15 +10,19 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.shell import ShellIntegration
 from agentworks.db import AppliedStateKey, VersionedPayload
 from agentworks.errors import ConnectivityError, StateError
+from agentworks.execution.errors import ExecutionIncomplete
 from agentworks.execution.results import Result, Unknown, UnknownReason
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.state import write_native_setup
+from agentworks.native_locks import NativeLockBusyError, native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.origin import Origin
 from agentworks.resources.registry import Registry
 from agentworks.secrets.policy import TtyInteractionPolicy
+from agentworks.ssh_config import sync_ssh_config
 from agentworks.vms.manager import delete_vm
 from agentworks.workspaces.manager import delete_workspace
+from tests.conftest import admitting_boundary, locking_node
 from tests.vm_access_support import install_access_recorder
 
 
@@ -47,8 +50,8 @@ def deletion(db, tmp_path, monkeypatch):
     registry.add("harness-integration", "shell", HarnessIntegrationEntry("shell", origin), origin)
     registry.finalize()
     monkeypatch.setattr("agentworks.bootstrap.load_request_registry", lambda *a, **k: registry)
-    monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", lambda *a, **k: nullcontext())
-    monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", lambda *a, **k: nullcontext())
+    monkeypatch.setattr("agentworks.agents.manager.lifecycle.gated_vm_boundary", admitting_boundary)
+    monkeypatch.setattr("agentworks.workspaces.manager.delete.gated_vm_boundary", admitting_boundary)
     # Session teardown and console cleanup run on the admin's access.
     install_access_recorder(monkeypatch)
     monkeypatch.setattr("agentworks.harness_setup.lifecycle.site_platform_name", lambda *a: "fixture")
@@ -61,12 +64,12 @@ def deletion(db, tmp_path, monkeypatch):
     removed = []
 
     def remove_agent(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         removed.append("agent")
 
     def remove_workspace(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         removed.append("workspace")
 
@@ -149,16 +152,16 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
     removed = []
 
     def remove(vm, ctx):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         if outcome == "delete-failed":
             raise ConnectivityError("platform refused")
         removed.append(vm.name)
 
-    def boundary(*args, **kwargs):
+    def boundary(db, _config, vm, **kwargs):
         if outcome == "binding-failed":
             raise StateError("platform unavailable")
-        return SimpleNamespace(site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
+        return locking_node(db, vm, site=SimpleNamespace(platform=SimpleNamespace(delete=remove))), Mock()
 
     monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
     delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
@@ -171,7 +174,7 @@ def test_forced_vm_deletion_retires_owners_whatever_the_backend_outcome(
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project"), ("vm", "box")])
 def test_deletion_refuses_vm_family_contention_before_native_mutation(db, deletion, kind, name):
-    with native_mutation_guard(db.path, "box"), pytest.raises(NativeSetupBusyError):
+    with native_locks(db.path, vm_exclusive("box")), pytest.raises(NativeLockBusyError):
         if kind == "agent":
             delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
         elif kind == "workspace":
@@ -192,41 +195,61 @@ def test_orphan_workspace_deletion_does_not_require_native_target(db, deletion):
 
 
 @pytest.mark.parametrize("kind,name", [("agent", "agent"), ("workspace", "project")])
-def test_remote_cleanup_failure_keeps_existing_best_effort_parent_deletion(db, deletion, monkeypatch, kind, name):
+def test_remote_cleanup_failure_keeps_the_row_for_a_rerun(db, deletion, monkeypatch, kind, name):
+    """An account or workspace that was not confirmed removed keeps its row, so a rerun retries the removal."""
     _store_applied_state(db, kind, name, "claims")
     # The user delete and the workspace's own removal run on the admin's access.
     install_access_recorder(monkeypatch).access().default_outcome = Result(Unknown(UnknownReason.CONNECTION))
     if kind == "agent":
         monkeypatch.setattr("agentworks.agents.initializer.delete_agent_on_vm", deletion.delete_agent_on_vm)
-        delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_agent(name) is None
+        with pytest.raises(ExecutionIncomplete):
+            delete_agent(db, deletion.config, name=name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_agent(name) is not None
     else:
         monkeypatch.setattr("agentworks.workspaces.backends.vm.delete_vm_workspace", deletion.delete_vm_workspace)
         db.update_vm_tailscale("box", "box")
-        delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
-        assert db.get_workspace(name) is None
+        with pytest.raises(ExecutionIncomplete):
+            delete_workspace(db, deletion.config, name, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        assert db.get_workspace(name) is not None
     assert deletion.logs[0].closed
 
 
 @pytest.mark.parametrize("applied_state", ["none", "claims", "malformed", "future"])
-def test_rehome_holds_its_vm_guard_without_interpreting_applied_state(db, deletion, monkeypatch, applied_state):
+def test_rehome_holds_its_vm_lock_without_interpreting_applied_state(db, deletion, monkeypatch, applied_state):
     from agentworks.workspaces.manager import rehome_workspace
 
     if applied_state != "none":
         _store_applied_state(db, "workspace", "project", applied_state)
     previous = db.instance_state.get_applied_slices("workspace", "project")
-    calls = []
+    locked: list[bool] = []
 
-    def move(*args, **kwargs):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
-            pass
-        calls.append("move")
+    class Moved(Exception):
+        pass
 
-    monkeypatch.setattr("agentworks.workspaces.manager.rehome._rehome_vm", move)
-    rehome_workspace(
-        db, deletion.config, "project", target_path="/new/project", yes=True, interaction=TtyInteractionPolicy.REFUSE
-    )
-    assert calls == ["move"]
+    def probe_paths(*args, **kwargs):
+        try:
+            with native_locks(db.path, vm_exclusive("box")):
+                locked.append(False)
+        except NativeLockBusyError:
+            locked.append(True)
+            raise Moved from None
+
+    from agentworks.db import InitStatus
+
+    db.update_vm_init_status("box", InitStatus.COMPLETE)
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome.gated_vm_boundary", admitting_boundary)
+    monkeypatch.setattr("agentworks.workspaces.manager.rehome._refuse_unusable_paths", probe_paths)
+    with pytest.raises(Moved):
+        rehome_workspace(
+            db,
+            deletion.config,
+            "project",
+            target_path="/new/project",
+            yes=True,
+            interaction=TtyInteractionPolicy.REFUSE,
+        )
+    # The directory checks run once unlocked, before the confirmation, and again under the lock.
+    assert locked == [False, True]
 
     assert db.instance_state.get_applied_slices("workspace", "project") == previous
 
@@ -252,3 +275,29 @@ def test_workspace_delete_keeps_parent_policy_for_unreadable_session_artifacts(
     delete_workspace(db, deletion.config, "project", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
     assert db.get_workspace("project") is None and db.get_session("session") is None
     assert deletion.removed == ["workspace"]
+
+
+@pytest.mark.parametrize("kind", ["agent", "vm"])
+def test_a_completed_delete_only_warns_when_the_ssh_config_rebuild_lock_is_held(
+    db, deletion, monkeypatch, captured_output, kind
+):
+    """The rows are gone once the rebuild runs, so a rebuild that cannot take its turn warns instead of failing."""
+    from agentworks import ssh_config_lock
+
+    monkeypatch.setattr("agentworks.ssh_config.sync_ssh_config", sync_ssh_config)
+    monkeypatch.setattr(ssh_config_lock, "WAIT_SECONDS", 0.05)
+
+    def boundary(db, _config, vm, **kwargs):
+        site = SimpleNamespace(platform=SimpleNamespace(delete=lambda vm, ctx: None))
+        return locking_node(db, vm, site=site), Mock()
+
+    monkeypatch.setattr("agentworks.vms.manager.power._live_vm_boundary", boundary)
+    with ssh_config_lock.ssh_config_rebuild_lock():
+        if kind == "agent":
+            delete_agent(db, deletion.config, name="agent", yes=True, interaction=TtyInteractionPolicy.REFUSE)
+        else:
+            delete_vm(db, deletion.config, "box", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_agent("agent") is None
+    assert (db.get_vm("box") is None) is (kind == "vm")
+    assert captured_output.warnings

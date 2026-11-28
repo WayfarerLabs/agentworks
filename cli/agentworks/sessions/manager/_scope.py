@@ -23,10 +23,10 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import Database, SessionRow, VMRow, WorkspaceRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.steps import InitLog
+    from agentworks.vms.nodes import LiveVMNode
 
 
 def _require_workspace(db: Database, name: str) -> WorkspaceRow:
@@ -80,12 +80,11 @@ def _prepare_vm(
     session: SessionRow,
     *,
     operation: str,
-    held_native_guard: NativeMutationGuard | None = None,
     interaction: TtyInteractionPolicy,
-) -> Iterator[tuple[WorkspaceRow, VMRow, VMAccess, InitLog]]:
+) -> Iterator[tuple[WorkspaceRow, LiveVMNode, VMAccess, InitLog]]:
     """The singular session ops' composition root (delete / attach /
     logs): validate the session's workspace and VM rows, then yield
-    ``(ws, vm, admin, log)`` INSIDE ``gated_vm_boundary``'s held-active
+    ``(ws, vm_node, admin, log)`` INSIDE ``gated_vm_boundary``'s held-active
     span, which replaces the imperative bind + point gate and the
     callers' own ``vm_active`` holds. ``admin`` is the admin's access,
     logging to ``log``, the ``operation``'s own log, which redacts what the
@@ -118,11 +117,10 @@ def _prepare_vm(
         vm,
         scope=_session_scope(db, session, ws, vm),
         interaction=interaction,
-        held_native_guard=held_native_guard,
-    ) as (_node, resolver, _context):
+    ) as (vm_node, resolver, _context):
         redactions = tuple(value for value in resolver.values.values() if value)
         with operation_log(vm.name, operation, redactions=redactions) as log:
-            yield ws, vm, _mgr._identity_access(vm, config, None, logger=log), log
+            yield ws, vm_node, _mgr._identity_access(vm_node.row, config, None, logger=log), log
 
 
 def _require_session(db: Database, name: str) -> SessionRow:

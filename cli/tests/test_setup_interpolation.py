@@ -189,11 +189,18 @@ def test_dotfiles_render_target_fields_and_keep_source_literal(
     monkeypatch.setattr(f"{module}.sync_dotfiles", lambda files, **kwargs: synced.update(kwargs))
     if agent:
         recorder = install_access_recorder(monkeypatch)
-        recorder.answer = lambda call: (
-            Result(Completed(2))
-            if isinstance(call.request, Command) and call.request.argv[:2] == ("getent", "passwd")
-            else None
-        )
+
+        def answer(call: Call) -> Result | None:
+            if isinstance(call.request, Command) and call.request.argv[:2] == ("getent", "passwd"):
+                return Result(Completed(2))
+            if (
+                isinstance(call.request, Script)
+                and call.request.source == f"test -e /home/{user} || test -L /home/{user}"
+            ):
+                return Result(Completed(1))
+            return None
+
+        recorder.answer = answer
         create_agent_on_vm(
             vm,
             config,

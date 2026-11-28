@@ -7,21 +7,36 @@ from typing import TYPE_CHECKING
 
 from agentworks import output
 from agentworks.agents.grants import MAX_WORKSPACE_NAME_LENGTH
-from agentworks.errors import AgentworksError, AlreadyExistsError, ExternalError, NotFoundError, StateError
+from agentworks.errors import (
+    AgentworksError,
+    AlreadyExistsError,
+    ExternalError,
+    NotFoundError,
+    StateConflictError,
+    StateError,
+)
 from agentworks.execution.requests import Command, FromFile, ToFile
 from agentworks.naming import validate_name
+from agentworks.native_locks import probe_locks
 from agentworks.path_rendering import format_host_path
+from agentworks.recheck import require_request_unchanged, require_unchanged, require_vm_unchanged, workspace_fields
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.vms.manager import gated_vm_boundary
 from agentworks.workspaces.backends.vm import default_workspace_path
-from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied
+from agentworks.workspaces.guest import FIND_DEADLINE, ensure_group, path_occupied, stored_workspace_path
+from agentworks.workspaces.locks import (
+    require_trees_unchanged,
+    walk_trees,
+    with_trees,
+)
 from agentworks.workspaces.manager._common import _guard_vm_status, _resolve_vm, _workspace_scope
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from agentworks.config import Config
-    from agentworks.db import Database, VMRow
+    from agentworks.db import Database, VMRow, WorkspaceRow
+    from agentworks.native_locks import LockRequest
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
@@ -42,19 +57,23 @@ def copy_workspace(
     """Copy a workspace to a new VM workspace.
 
     Orchestrated (``vms.manager.gated_vm_boundary``, WORKSPACE scope),
-    the first two-VM command: the composition stays SEQUENTIAL per VM,
-    exactly the imperative shape, rather than a coalesced multi-root
-    single-boundary graph. The imperative command ran two separate
-    binds (two prompt sessions, one per site, when source and dest
-    differ), and the dest VM is only known mid-command
-    (``_resolve_vm`` may interactively prompt); coalescing would merge
-    prompt sessions AND hoist the interactive chooser, both behavior
-    changes beyond parity. The source boundary (source workspace's
-    scope) is entered on the ExitStack before the pack; when the dest
-    VM differs, a SECOND boundary (dest workspace's scope) nests on
-    the same stack so both VMs stay held; the same-VM case reuses the
-    source composition with no second boundary. The multi-root walk
-    stays available for the batch commands that already coalesce.
+    the first two-VM command: the composition stays SEQUENTIAL per VM
+    rather than a coalesced multi-root single-boundary graph, so two
+    sites keep two prompt sessions. The destination VM is chosen first
+    (``_resolve_vm`` may prompt), then the source boundary (source
+    workspace's scope) is entered on the ExitStack and, when the
+    destination VM differs, a SECOND boundary (destination workspace's
+    scope) nests on the same stack so both VMs stay held; the same-VM
+    case reuses the source composition with no second boundary. Each VM's
+    lock set is probed before the gates: on the destination the new
+    workspace, its target tree, the admin's grant and one per grant-all
+    agent, with grant-all shared; on the source its tree, read whole and so
+    exclusive, with the source workspace shared. With every prompt
+    answered, the trees are walked on their VMs and each VM's set is taken
+    in VM name order (one set when both are the same VM) and held across
+    the pack and the unpack; the rows and walks read before are read again.
+    The multi-root walk stays available for the batch commands that
+    already coalesce.
 
     The tree goes VM, workstation, VM as a gzipped tar stream that is
     never extracted on the workstation, so modes and links survive any
@@ -62,7 +81,7 @@ def copy_workspace(
     and then gives the tree to the admin and the workspace group. Nothing is
     staged on the destination VM: it extracts from the request's input. The
     source read is logged to the source VM's own operation log
-    (``workspace-copy-source``), since the destination is chosen only after it.
+    (``workspace-copy-source``).
     """
     import contextlib
     import tempfile
@@ -93,7 +112,6 @@ def copy_workspace(
         # ToFile creates its file, so the archive's path is new in a private directory.
         archive = Path(scratch) / "workspace.tgz"
         with contextlib.ExitStack() as _keepalive_stack:
-            # --- Pack from source ---
             src_vm = db.get_vm(src_ws.vm_name)
             if src_vm is None:
                 raise NotFoundError(
@@ -102,8 +120,15 @@ def copy_workspace(
                     entity_name=src_ws.vm_name,
                 )
             _guard_vm_status(src_vm)
+            # The destination is chosen before any gate opens: the chooser
+            # is a read like the others, and every prompt precedes the guards.
+            dest_vm = _resolve_vm(db, vm_name)
+            _guard_vm_status(dest_vm)
+            requests = _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)
+            for locked_vm in sorted(requests):
+                probe_locks(db.path, requests[locked_vm])
             registry = load_request_registry(config, live_database=db)
-            _keepalive_stack.enter_context(
+            src_node, _resolver, _ctx = _keepalive_stack.enter_context(
                 gated_vm_boundary(
                     db,
                     config,
@@ -113,13 +138,65 @@ def copy_workspace(
                     interaction=interaction,
                 )
             )
-            if src_vm.tailscale_host is None:
-                raise StateError(
-                    f"VM '{src_vm.name}' has no Tailscale address",
-                    entity_kind="vm",
-                    entity_name=src_vm.name,
+            nodes = {src_vm.name: src_node}
+            if dest_vm.name != src_vm.name:
+                dest_node, _resolver, _ctx = _keepalive_stack.enter_context(
+                    gated_vm_boundary(
+                        db,
+                        config,
+                        registry,
+                        dest_vm,
+                        scope=_workspace_scope(db, dest_vm, dest_name),
+                        interaction=interaction,
+                    )
+                )
+                nodes[dest_vm.name] = dest_node
+            # Same VM: the source boundary and held span above already
+            # gate and hold it; a second boundary would re-run the
+            # resolve pass. The rows the gates admitted carry any address
+            # a boot recorded.
+            src_vm, dest_vm = nodes[src_vm.name].row, nodes[dest_vm.name].row
+            for vm in (src_vm, dest_vm):
+                if vm.tailscale_host is None:
+                    raise StateError(
+                        f"VM '{vm.name}' has no Tailscale address",
+                        entity_kind="vm",
+                        entity_name=vm.name,
+                    )
+
+            # One set per VM, taken in VM name order once both are admitted,
+            # and held across the pack and the unpack: the source cannot be
+            # changed under the read, nor the destination under the write.
+            source_tree = walk_trees(src_vm, config, [stored_workspace_path(src_ws.workspace_path)])
+            target_tree = walk_trees(dest_vm, config, [default_workspace_path(config, dest_name)])
+            trees = {src_vm.name: [source_tree], dest_vm.name: [target_tree]}
+            if src_vm.name == dest_vm.name:
+                trees[src_vm.name] = [source_tree, target_tree]
+            for locked_vm in sorted(nodes):
+                request = with_trees(requests[locked_vm], *trees[locked_vm])
+                _keepalive_stack.enter_context(nodes[locked_vm].locked(request))
+            for node in nodes.values():
+                require_vm_unchanged(db, node.row)
+            require_trees_unchanged(src_vm, config, source_tree)
+            require_trees_unchanged(dest_vm, config, target_tree)
+            require_request_unchanged(
+                "vm",
+                dest_vm.name,
+                requests[dest_vm.name],
+                _copy_requests(db, src_ws, src_vm, dest_vm, dest_name)[dest_vm.name],
+            )
+            require_unchanged(
+                "workspace", source_name, workspace_fields(src_ws), workspace_fields(db.get_workspace(source_name))
+            )
+            if db.get_workspace(dest_name) is not None:
+                raise StateConflictError(
+                    f"workspace '{dest_name}' was created since this command read it",
+                    entity_kind="workspace",
+                    entity_name=dest_name,
+                    hint="Run the command again with another name.",
                 )
 
+            # --- Pack from source ---
             output.info(f"Packing workspace '{source_name}' from VM '{src_vm.name}'...")
             with operation_log(src_vm.name, "workspace-copy-source") as source_log:
                 # Unelevated, as the admin, who can read every workspace. The
@@ -137,29 +214,6 @@ def copy_workspace(
                     raise _copy_failure(error, source_name, source_log) from error
 
             # --- Unpack to destination VM ---
-            dest_vm = _resolve_vm(db, vm_name)
-            _guard_vm_status(dest_vm)
-            if dest_vm.name != src_vm.name:
-                _keepalive_stack.enter_context(
-                    gated_vm_boundary(
-                        db,
-                        config,
-                        registry,
-                        dest_vm,
-                        scope=_workspace_scope(db, dest_vm, dest_name),
-                        interaction=interaction,
-                    )
-                )
-            # Same VM: the source boundary and held span above already
-            # gate and hold it; a second boundary would re-run the
-            # resolve pass.
-            if dest_vm.tailscale_host is None:
-                raise StateError(
-                    f"VM '{dest_vm.name}' has no Tailscale address",
-                    entity_kind="vm",
-                    entity_name=dest_vm.name,
-                )
-
             # Exactly-once close, however the span ends (a cancellation, the
             # sanctioned KeyboardInterrupt re-raise out of
             # materialize_grant_all_agents, or an error from any request), so
@@ -276,3 +330,24 @@ def _unpack(db: Database, config: Config, dest_vm: VMRow, dest_name: str, archiv
 
     vscode_path = generate_vscode_workspace(dest_vm, config, dest_name, workspace_path)
     output.detail(f"VS Code workspace: {format_host_path(vscode_path)}")
+
+
+def _copy_requests(
+    db: Database, src_ws: WorkspaceRow, src_vm: VMRow, dest_vm: VMRow, dest_name: str
+) -> dict[str, LockRequest]:
+    """Copy's lock set per VM, without its trees.
+
+    The destination creates ``dest_name`` as workspace create does; the
+    source workspace is held shared, so it cannot be deleted, rehomed or
+    repaired mid-copy while its sessions keep running. One VM gets one set.
+    """
+    from agentworks.native_locks import LockRequest
+    from agentworks.native_locks.rows import workspace_entity_for
+    from agentworks.workspaces.locks import workspace_create_request
+
+    destination = workspace_create_request(db, dest_vm, dest_name)
+    source = workspace_entity_for(src_ws)
+    if src_vm.name == dest_vm.name:
+        merged = LockRequest(exclusive=destination.exclusive, shared=(*destination.shared, source))
+        return {dest_vm.name: merged}
+    return {src_vm.name: LockRequest(shared=(source,)), dest_vm.name: destination}

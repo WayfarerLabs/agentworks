@@ -248,8 +248,8 @@ class PendingSessionNode:
 
     def teardown(self) -> None:
         """Clean up the session's PARTIAL realization artifacts: the
-        DB row, the implicit workspace grant, and (when no other grant
-        remains) the agent's workspace-group membership.
+        agent's workspace-group membership (when no other grant
+        remains), then the DB row and the implicit workspace grant.
 
         This is a partial-state cleaner by parity with the imperative
         session-internal rollback: it runs when the realizing slice
@@ -264,42 +264,54 @@ class PendingSessionNode:
         """
         from agentworks import output
 
+        if self._agent is not None and not self._remove_last_membership(self._agent):
+            return
         try:
             self._db.delete_session(self._name)
         except Exception as e:
             output.warn(f"rollback: failed to delete session row '{self._name}': {e}")
         if self._agent is None:
             return
-        agent_name = self._agent.name
-        workspace_name = self._workspace.name
         try:
-            self._db.delete_agent_grant(agent_name, workspace_name, "implicit", session_name=self._name)
-            remaining = self._db.has_any_grant(agent_name, workspace_name)
+            self._db.delete_agent_grant(self._agent.name, self._workspace.name, "implicit", session_name=self._name)
         except Exception as e:
             output.warn(
                 f"rollback: failed to revoke implicit grant for agent "
-                f"'{agent_name}' on workspace '{workspace_name}': {e}"
+                f"'{self._agent.name}' on workspace '{self._workspace.name}': {e}"
             )
-            return
-        if not remaining:
-            try:
-                from agentworks.agents.grants import remove_from_workspace_group
 
-                # Re-read the VM row: the activation gate may have
-                # updated its Tailscale address since node construction.
-                vm_row = self._db.get_vm(self._vm.row.name) or self._vm.row
-                remove_from_workspace_group(
-                    vm_row,
-                    self._config,
-                    self._db,
-                    self._agent.linux_user,
-                    workspace_name,
-                    logger=None,
-                )
-            except Exception as e:
-                output.warn(
-                    f"rollback: failed to remove agent '{agent_name}' from workspace '{workspace_name}' group: {e}"
-                )
+    def _remove_last_membership(self, agent: AgentNode) -> bool:
+        """Remove the agent's workspace-group membership when this session's grant is its last there.
+
+        Returns whether the rows may go: a removal that failed keeps the
+        session and grant rows, so ``agw session delete`` retries it.
+        """
+        from agentworks import output
+        from agentworks.agents.grants import holds_other_grant, remove_from_workspace_group
+
+        agent_name = agent.name
+        workspace_name = self._workspace.name
+        try:
+            if holds_other_grant(self._db, agent_name, workspace_name, grant_type="implicit", session_name=self._name):
+                return True
+            # Re-read the VM row: the activation gate may have
+            # updated its Tailscale address since node construction.
+            vm_row = self._db.get_vm(self._vm.row.name) or self._vm.row
+            remove_from_workspace_group(
+                vm_row,
+                self._config,
+                self._db,
+                agent.linux_user,
+                workspace_name,
+                logger=None,
+            )
+        except Exception as e:
+            output.warn(
+                f"rollback: failed to remove agent '{agent_name}' from workspace '{workspace_name}' group: {e}. "
+                f"Session '{self._name}' and its grant are kept; remove them with 'agw session delete {self._name}'."
+            )
+            return False
+        return True
 
 
 def _harness_integration_for_template(

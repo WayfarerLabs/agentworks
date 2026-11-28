@@ -63,7 +63,7 @@ def test_a_failed_repair_step_warns_with_the_guests_stderr_and_repair_keeps_a_lo
     captured_output: CapturedOutput,  # noqa: ANN001
 ) -> None:
     _ready(db, monkeypatch)
-    guest = FailingGuest({("which", "setfacl"): "", ("apt-get", "install"): "E: fixture apt failure"})
+    guest = FailingGuest({("which", "setfacl"): "", ("apt-get",): "E: fixture apt failure"})
     recorder = route(monkeypatch, guest)
 
     workspace_manager.repair_workspace(db, make_config(), "ws1", interaction=TtyInteractionPolicy.REFUSE)

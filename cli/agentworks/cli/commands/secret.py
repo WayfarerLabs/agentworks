@@ -8,7 +8,7 @@ import typer
 
 from agentworks import output
 from agentworks.capabilities.secret_backend import OperatorImpact
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import (
     get_db,
     load_completion_registry,
@@ -18,6 +18,7 @@ from agentworks.cli._helpers import (
 from agentworks.machine_output import OutputFormat
 
 secret_app = typer.Typer(
+    cls=CommandPathGroup,
     name="secret",
     help="Inspect declared secrets and their source mappings.",
     no_args_is_help=True,

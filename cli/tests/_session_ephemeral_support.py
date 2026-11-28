@@ -54,22 +54,22 @@ def _stub_build_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 def _seed_two_vms(tmp_path: Path) -> Database:
     """Two VMs each with one workspace and one agent.
 
-    vm-A hosts ws-A and agt-A; vm-B hosts ws-B and agt-B. Useful for
+    vm-a hosts ws-a and agt-a; vm-b hosts ws-b and agt-b. Useful for
     cross-VM mismatch tests.
     """
     db = Database(tmp_path / "test.db")
-    for name, address in (("vm-A", "100.64.0.1"), ("vm-B", "100.64.0.2")):
+    for name, address in (("vm-a", "100.64.0.1"), ("vm-b", "100.64.0.2")):
         db.insert_vm(name, "lima", "h", admin_username="admin")
         db.update_vm_tailscale(name, address)
         db.update_vm_init_status(name, InitStatus.COMPLETE)
     db._conn.execute(
         "INSERT INTO workspaces (name, vm_name, workspace_path, linux_group) VALUES "
-        "('ws-A', 'vm-A', '/home/me/ws-A', 'ws-ws-A'),"
-        "('ws-B', 'vm-B', '/home/me/ws-B', 'ws-ws-B')"
+        "('ws-a', 'vm-a', '/home/me/ws-a', 'ws-ws-a'),"
+        "('ws-b', 'vm-b', '/home/me/ws-b', 'ws-ws-b')"
     )
     db._conn.commit()
-    db.insert_agent("agt-A", "vm-A", "aw-agt-A")
-    db.insert_agent("agt-B", "vm-B", "aw-agt-B")
+    db.insert_agent("agt-a", "vm-a", "aw-agt-a")
+    db.insert_agent("agt-b", "vm-b", "aw-agt-b")
     return db
 
 

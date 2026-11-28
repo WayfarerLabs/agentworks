@@ -109,9 +109,9 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
 ) -> None:
     """Cross-VM copy: TWO boundary bursts in order (source first, then
     dest; one shared site config here, so both bursts name the site's
-    secret), the dest boundary only entered after the pack (the dest VM is
-    resolved mid-command), and BOTH holds open concurrently (the dest span
-    nests inside the source span)."""
+    secret), both entered before the pack, so every prompt precedes the
+    guards, and BOTH holds open concurrently (the dest span nests inside
+    the source span)."""
     config = make_config()
     seed(db)
     _second_vm(db)
@@ -122,8 +122,7 @@ def test_copy_cross_vm_runs_two_sequential_boundaries_with_nested_holds(
     _copy(db, config, vm_name="box2")
 
     assert resolve_counter == [["proxmox-token"], ["proxmox-token"]]
-    assert events.index("hold-enter:box") < events.index("pack")
-    assert events.index("pack") < events.index("hold-enter:box2")
+    assert events.index("hold-enter:box") < events.index("hold-enter:box2") < events.index("pack")
     assert events.index("hold-exit:box2") < events.index("hold-exit:box")
     row = db.get_workspace("ws2")
     assert row is not None and row.vm_name == "box2" and row.template == "copied"

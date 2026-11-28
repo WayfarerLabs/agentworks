@@ -7,12 +7,13 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.cli._helpers import get_db, ordinary_tty_interaction_policy, parse_csv_sort
 from agentworks.db import DesiredRuntimeState  # noqa: TC001 (Typer resolves annotations at runtime)
 from agentworks.machine_output import OutputFormat
 
 vm_app = typer.Typer(
+    cls=CommandPathGroup,
     name="vm",
     help="Manage virtual machines.",
     no_args_is_help=True,

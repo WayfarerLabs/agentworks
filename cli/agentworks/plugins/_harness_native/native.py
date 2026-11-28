@@ -14,6 +14,7 @@ from agentworks import output
 from agentworks.artifacts.application import ArtifactApplication
 from agentworks.artifacts.config_files import publish_config
 from agentworks.artifacts.model import ArtifactInputs
+from agentworks.artifacts.native.layout import recorded_roots_outside_home
 from agentworks.artifacts.native.mcp import apply_mcp
 from agentworks.capabilities.harness_integration.settings import (
     PreparedSettings,
@@ -284,6 +285,24 @@ def _check_contributions(
             raise ConfigError("mapped settings still request a native association removed from explicit setup")
 
 
+def _drop_claims_outside_home(invocation: UserSetupInvocation, claims: list[NativeClaim]) -> list[NativeClaim]:
+    """``claims`` without those recorded under a native root outside HOME, each such root warned about.
+
+    Such a root is never reconciled: its native CLI writes would fall outside
+    this account's lock. Dropping its claims is the way out for a root an
+    earlier release recorded, which the operator cleans up by hand.
+    """
+    outside = recorded_roots_outside_home(
+        invocation.access, home=invocation.home, roots=(guest_path(claim.destination) for claim in claims)
+    )
+    for root in sorted(outside):
+        output.warn(
+            f"Dropped the plugin and marketplace records under {sanitize_setup_diagnostic(root)!r}, which is "
+            "outside HOME, without reconciling them; remove what they installed there by hand."
+        )
+    return [claim for claim in claims if guest_path(claim.destination) not in outside]
+
+
 def setup_user(
     tool: NativeTool,
     config: NativeUserConfig | None,
@@ -303,7 +322,9 @@ def setup_user(
     root = native_root
     if mapping is None and any(claim.role == "settings" for claim in claims):
         output.info("Removed settings mapping; native settings and their current values are retained.")
-    native_claims = [claim for claim in claims if claim.role in ("plugin", "marketplace")]
+    native_claims = _drop_claims_outside_home(
+        invocation, [claim for claim in claims if claim.role in ("plugin", "marketplace")]
+    )
     if len(native_claims) + len(preserved) != len(claims):
         invocation.checkpoint((*preserved, *native_claims))
     claims = native_claims.copy()

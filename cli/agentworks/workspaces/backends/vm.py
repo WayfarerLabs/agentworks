@@ -10,8 +10,9 @@ from uuid import uuid4
 
 import agentworks.execution as execution
 from agentworks import output
-from agentworks.errors import AlreadyExistsError
+from agentworks.errors import AgentworksError, AlreadyExistsError
 from agentworks.execution.access import Admin
+from agentworks.execution.errors import CommandFailed
 from agentworks.execution.requests import Command
 from agentworks.remote_presence import TEST_FALSE_STATUS, probe_presence
 from agentworks.workspaces.acls import apply_workspace_acls
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import VMRow
     from agentworks.execution.access import VMAccess
-    from agentworks.execution.errors import CommandFailed, ExecutionIncomplete, RequestRefused
+    from agentworks.execution.errors import ExecutionIncomplete, RequestRefused
     from agentworks.vms.initializer.phase_a import OperationLog
     from agentworks.vms.initializer.steps import InitLog
     from agentworks.workspaces.templates import ResolvedTemplate
@@ -261,6 +262,10 @@ def delete_vm_workspace(
     Group removal runs last, once the directory is gone and after the
     caller has removed the agent members; ``groupdel`` removes the group
     regardless of remaining supplementary members (the admin's included).
+
+    A removal that does not succeed raises its typed error, with a hint
+    naming what remains and where the command's output is, so a delete keeps
+    the workspace's row for a rerun to retry from.
     """
     assert vm.tailscale_host is not None
     admin = admin_access(vm, config, logger)
@@ -286,12 +291,13 @@ def delete_vm_workspace(
             admin.run(
                 Command(("rm", "-rf", "--", workspace_path), elevated=True, deadline=CLEANUP_DEADLINE), check=True
             )
-        admin.run(_group_removal(linux_group)).require_completed(vm.name)
-    except REQUEST_FAILURES:
-        output.warn(
-            f"Remote cleanup of workspace directory {workspace_path!r} and group {linux_group!r} was not confirmed. "
-            "Inspect them before retrying."
+        _remove_group(admin, vm.name, linux_group)
+    except AgentworksError as error:
+        error.add_hint(
+            f"Workspace directory {workspace_path!r} or group {linux_group!r} may remain; "
+            f"run 'agw vm logs {vm.name}' for the removal's output."
         )
+        raise
 
 
 def delete_vm_workspace_keeping_files(
@@ -305,20 +311,23 @@ def delete_vm_workspace_keeping_files(
     assert vm.tailscale_host is not None
     admin = admin_access(vm, config, logger)
     try:
-        admin.run(_group_removal(linux_group)).require_completed(vm.name)
-    except REQUEST_FAILURES:
-        output.warn(f"Removal of workspace group {linux_group!r} was not confirmed. Inspect it before retrying.")
+        _remove_group(admin, vm.name, linux_group)
+    except AgentworksError as error:
+        error.add_hint(f"Group {linux_group!r} may remain; run 'agw vm logs {vm.name}' for the removal's output.")
+        raise
 
 
-def _group_removal(linux_group: str) -> Command:
-    """``groupdel`` of the workspace's group, as root.
+GROUPDEL_REMOVED_STATUSES = frozenset({0, 6})
+"""The ``groupdel`` statuses after which the group is gone: 0, removed; 6, it did not exist."""
 
-    Its status is not checked, so a group that is already gone (or,
-    defensively, one groupdel refuses to remove) is tolerated rather than
-    failing the delete, mirroring the best-effort group-membership teardown in
-    agents/grants.py.
-    """
-    return Command(("/usr/sbin/groupdel", linux_group), elevated=True, deadline=PROBE_DEADLINE)
+
+def _remove_group(admin: VMAccess, vm_name: str, linux_group: str) -> None:
+    """``groupdel`` of the workspace's group, as root, raising ``CommandFailed`` unless the group is gone."""
+    request = Command(("/usr/sbin/groupdel", linux_group), elevated=True, deadline=PROBE_DEADLINE)
+    result = admin.run(request)
+    status = result.require_completed(vm_name)
+    if status not in GROUPDEL_REMOVED_STATUSES:
+        raise CommandFailed(vm_name, status, result, streams_logged=request.log_streams)
 
 
 def generate_vscode_workspace(

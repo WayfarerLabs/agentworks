@@ -1175,7 +1175,7 @@ def test_reinit_reconcile_is_idempotent_across_repeated_reinits(
     captured_output,  # noqa: ANN001
 ) -> None:
     """The reconcile runs on every reinit and is safe to repeat because it is
-    idempotent: ``add_to_workspace_group`` is ``getent || groupadd`` then
+    idempotent: ``add_to_workspace_group`` is ``groupadd -f`` then
     ``usermod -aG``, a no-op once membership holds. A second reinit still
     invokes it, completes cleanly, and duplicates no grant rows."""
     config = make_config()
@@ -1282,8 +1282,9 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
     resolve_counter,
 ):
     from agentworks.capabilities.harness_integration.shell import ShellIntegration
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
     from agentworks.harness_setup.state import read_native_setup
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
 
     config = make_config()
     _seed_vm(db)
@@ -1299,7 +1300,7 @@ def test_active_user_setup_joins_eager_env_and_runs_after_core(
         assert invocation.environment["SETUP_TOKEN"] == "setup-private"
         assert invocation.environment["AGENTWORKS_AGENT"] == "dev"
         assert "AGENTWORKS_WORKSPACE" not in invocation.environment
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "box"):
+        with pytest.raises(NativeLockBusyError), native_locks(db.path, vm_exclusive("box")):
             pass
         calls.append(invocation)
         return ArtifactApplication()
@@ -1467,3 +1468,144 @@ def test_reinit_binding_line_appears_only_when_the_effective_template_changes(
     (binding,) = [line for line in changed if repr("other") in line]
     assert repr("default") in binding
     assert not any(repr("other") in line for line in unchanged)
+
+
+@pytest.mark.parametrize("change", ["template", "overlay"])
+def test_reinit_refuses_a_declaration_changed_after_its_early_save(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    db.insert_agent("dev", "box", "agt-dev", template="default")
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_while_another_reinit_saves(self: Resolver) -> None:
+        # After this reinit saved its declaration and before its final set, another one saves its own.
+        resolve(self)
+        if change == "template":
+            db.update_agent_template("dev", "other")
+        else:
+            db.instance_state.put_desired_overlay(
+                "agent", "dev", parse_instance_spec("agent", '{"shell":"zsh"}').payload
+            )
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_while_another_reinit_saves)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert "agent_name" not in mutation
+
+
+def test_create_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed_vm(db)
+    _add_workspace(db, "ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _add_workspace(db, "late"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.create_agent(
+            db, config, name="dev", vm_name="box", grant_all_workspaces=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.get_agent("dev") is None
+    assert mutation == {}
+
+
+def test_reinit_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, ["ws1"])
+    _add_workspace(db, "ws2")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("dev", "ws2", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert mutation == {}
+
+
+def test_reinit_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A VM overlay write finishing during the gate's prompt: setup was prepared from the record as it was."""
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _seed_granted_agent(db, [])
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_vm_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay("vm", "box", parse_instance_spec("vm", '{"env":{"LATER":"y"}}').payload)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_vm_layer_is_replaced)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.reinit_agent(db, config, name="dev", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert mutation == {}
+
+
+def test_create_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_vm_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay("vm", "box", parse_instance_spec("vm", '{"env":{"LATER":"y"}}').payload)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_vm_layer_is_replaced)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.create_agent(db, config, name="dev", vm_name="box", interaction=TtyInteractionPolicy.REFUSE)
+
+    assert db.get_agent("dev") is None
+    assert mutation == {}

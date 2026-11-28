@@ -6,10 +6,12 @@ from typing import Annotated
 
 import typer
 
-from agentworks.cli._app import app
+from agentworks.cli._app import CommandPathGroup, app
 from agentworks.machine_output import OutputFormat
 
-artifact_app = typer.Typer(name="artifact", help="Inspect scoped agent artifact delivery.", no_args_is_help=True)
+artifact_app = typer.Typer(
+    cls=CommandPathGroup, name="artifact", help="Inspect scoped agent artifact delivery.", no_args_is_help=True
+)
 app.add_typer(artifact_app)
 
 

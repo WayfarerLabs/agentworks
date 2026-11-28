@@ -27,6 +27,7 @@ from agentworks import output
 from agentworks.errors import (
     AgentworksError,
     NotFoundError,
+    StateConflictError,
     StateError,
     UserAbort,
 )
@@ -44,13 +45,13 @@ if TYPE_CHECKING:
     from agentworks.config import Config
     from agentworks.db import ConsoleSessionRow, Database, SessionRow, ShellEntry, VMRow
     from agentworks.execution.access import VMAccess
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.machine_output import JsonObject
     from agentworks.resources.registry import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
     from agentworks.secrets.resolver import Resolver
     from agentworks.sessions.manager import SessionTmuxServer
+    from agentworks.vms.nodes import LiveVMNode
 
     from ._access import ConsoleAccess
 
@@ -407,25 +408,26 @@ def _active_console_vm(
     *,
     registry: Registry,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard,
     resolver: Resolver,
     targets: Callable[[VMRow], Sequence[SecretTarget]] | None,
-) -> Iterator[tuple[VMRow, VMAccess]]:
-    """Activate the console's VM and yield its row and the admin's access, held active.
+) -> Iterator[tuple[LiveVMNode, VMAccess]]:
+    """Activate the console's VM and yield its live node and the admin's access, held active, with nothing locked.
 
     The missing-VM and missing-address refusals come first, with nothing
     resolved. ``targets``, when the operation knows its panes before it
     observes anything (``console create``), gives their secret targets from
     the VM's row; they register on ``resolver`` before the activation gate,
     so a refused target leaves a stopped VM stopped. Activation resolves
-    only its own gate secrets, through ``resolver``. The caller then observes
-    read-only, decides what it will change, and calls
-    :func:`_console_pane_access` for exactly the panes it will open, before
-    its first change.
+    only its own gate secrets, through ``resolver``, with nothing locked; a
+    start, if the VM needs one, takes a brief vm exclusive, and the hold's
+    admission a brief vm shared. The caller then observes
+    read-only, decides what it will change, calls
+    :func:`_console_pane_access` for exactly the panes it will open, and
+    takes its lock set itself before its first change. The node's row is the
+    one the hold admitted, with any address a start recorded.
     """
     import agentworks.execution as execution
     from agentworks.execution.access import Admin
-    from agentworks.harness_setup.locking import native_mutation_guard
     from agentworks.vms.manager import require_vm_ssh_boundary
     from agentworks.vms.manager.runtime import activate_vm_runtime, prepare_vm_runtime
 
@@ -438,30 +440,16 @@ def _active_console_vm(
         raise StateError(f"VM '{vm.name}' has no Tailscale address", entity_kind="vm", entity_name=vm.name)
     context = None
     try:
-        with native_mutation_guard(db.path, vm_name, held=held_native_guard) as guard:
+        with contextlib.ExitStack() as holds:
             require_vm_ssh_boundary(db, config, vm)
-            node = preflight_console_vm(
-                db,
-                config,
-                registry,
-                vm,
-                held_native_guard=guard,
-                interaction=interaction,
-            )
+            node = preflight_console_vm(db, config, registry, vm, interaction=interaction)
             if targets is not None:
                 resolver.register_targets(targets(vm), allow_transient_auto_declare=True)
-            context = prepare_vm_runtime(
-                db,
-                config,
-                registry,
-                vm,
-                resolve_secret=resolver.resolve_gate,
-                held_native_guard=guard,
-                vm_node=node,
-            )
+            context = prepare_vm_runtime(db, config, registry, vm, resolve_secret=resolver.resolve_gate, vm_node=node)
+            # A boot takes a brief vm exclusive, and the hold's admission a brief vm shared.
             activate_vm_runtime(context)
-            with context.node.hold_active():
-                yield vm, execution.vm_access(vm, config, Admin())
+            holds.enter_context(context.node.hold_active())
+            yield context.node, execution.vm_access(context.node.row, config, Admin())
     finally:
         if context is not None:
             context.clear_values()
@@ -846,15 +834,33 @@ def delete_console(
     *,
     name: str,
     yes: bool = False,
-    held_native_guard: NativeMutationGuard | None = None,
+    only_if_empty: bool = False,
 ) -> None:
-    """Delete a console: tear down its tmux session (best-effort), then DB row."""
-    from ._helpers import guarded_console_selection
+    """Delete a console: tear down its tmux session (best-effort), then DB row.
 
-    with guarded_console_selection(db, name, held_native_guard=held_native_guard) as (console, _guard):
+    The confirmation is asked before the console's lock is taken; under it the
+    console and its members are read again, and a change refuses. With
+    ``only_if_empty`` it also refuses a console that has any configured
+    session, for the offer to delete a console a command left empty.
+    """
+    from agentworks.recheck import console_fields, require_unchanged
+
+    from ._helpers import locked_console, probe_console
+
+    _require_console(db, name)
+    read = console_fields(db, name)
+    probe_console(db, name)
+    if not yes and not output.confirm(f"Delete console '{name}'?"):
+        raise UserAbort("delete cancelled")
+    with locked_console(db, name) as (console, _held):
+        require_unchanged("console", name, read, console_fields(db, name))
         console = _require_console(db, name)
-        if not yes and not output.confirm(f"Delete console '{name}'?"):
-            raise UserAbort("delete cancelled")
+        if only_if_empty and db.list_console_sessions(name):
+            raise StateConflictError(
+                f"console '{name}' has configured sessions again",
+                entity_kind="console",
+                entity_name=name,
+            )
 
         # Best-effort tmux teardown. Don't block the DB delete on VM reachability.
         teardown_failed = False
@@ -885,7 +891,6 @@ def offer_delete_if_empty_consoles(
     console_names: Iterable[str],
     *,
     yes: bool,
-    held_native_guard: NativeMutationGuard | None = None,
 ) -> None:
     """For each named console now left with no configured sessions, offer to
     delete it (interactive) or report-but-keep it (--yes / non-interactive).
@@ -895,12 +900,14 @@ def offer_delete_if_empty_consoles(
     ``console remove-sessions`` (issue #265) reach after removing a session's
     console membership; both route here so the two paths stay byte-identical.
 
-    ``console_names`` is the set of candidate consoles (each caller passes the
-    consoles it just touched); a console is only acted on when
-    ``list_console_sessions`` reports it empty, the same predicate
-    ``console describe`` uses for its "Configured sessions" count. Emptiness is
-    read live from the DB here, so callers may pass consoles that still have
-    members and they are skipped.
+    Callers run it once their own lock set is released, so the offer holds
+    no lock while it waits for an answer. ``console_names`` is
+    the set of candidate consoles (each caller passes the consoles it just
+    touched); a console is only acted on when ``list_console_sessions``
+    reports it empty, the same predicate ``console describe`` uses for its
+    "Configured sessions" count, so callers may pass consoles that still have
+    members and they are skipped. The confirmed delete takes the console's
+    lock and refuses a console that gained a member meanwhile, which keeps it.
 
     The offer/auto-delete/report policy (including the TTY gate that keeps a
     scripted caller at exit 0 instead of EOF-aborting) is owned by
@@ -913,23 +920,18 @@ def offer_delete_if_empty_consoles(
 
     from agentworks.sessions._resource_cleanup import cleanup_now_empty_resource
 
-    from ._helpers import guarded_console_selection
-
     for console_name in console_names:
-        if db.get_console(console_name) is None:
+        if db.get_console(console_name) is None or db.list_console_sessions(console_name):
             continue
-        with guarded_console_selection(db, console_name, held_native_guard=held_native_guard) as (_console, guard):
-            if db.list_console_sessions(console_name):
-                continue
-            cleanup_now_empty_resource(
-                kind="console",
-                name=console_name,
-                created=False,
-                # Route through the package object so tests that monkeypatch
-                # ``multi_console.delete_console`` intercept the confirmed delete.
-                delete=partial(_mc.delete_console, db, config, name=console_name, yes=True, held_native_guard=guard),
-                manual_command=f"agw console delete {console_name}",
-                yes=yes,
-                empty_clause="has no configured sessions left",
-                report_clause="now has no configured sessions",
-            )
+        cleanup_now_empty_resource(
+            kind="console",
+            name=console_name,
+            created=False,
+            # Route through the package object so tests that monkeypatch
+            # ``multi_console.delete_console`` intercept the confirmed delete.
+            delete=partial(_mc.delete_console, db, config, name=console_name, yes=True, only_if_empty=True),
+            manual_command=f"agw console delete {console_name}",
+            yes=yes,
+            empty_clause="has no configured sessions left",
+            report_clause="now has no configured sessions",
+        )

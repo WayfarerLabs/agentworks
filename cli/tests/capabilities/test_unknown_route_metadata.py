@@ -14,12 +14,12 @@ from agentworks.artifacts.state import capture_owner, write_capture
 from agentworks.capabilities.harness_integration import ShellIntegration
 from agentworks.capabilities.harness_integration.kinds import HarnessIntegrationEntry
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, WorkspaceSetupInvocation
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.outcomes import SetupFailure
 from agentworks.origin import Origin
 from agentworks.schema import CapabilityConfig
 from tests.artifacts.test_routing import Graph, graph
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 
 pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="local Linux guest filesystem execution")
 
@@ -117,7 +117,9 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
         method = "user_init" if component == "agent" else "workspace_init"
         with monkeypatch.context() as prior_hook:
             prior_hook.setattr(ShellIntegration, method, defer_upstream)
-            prior = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="initial-setup")
+            prior = run_setup_held(
+                db, fixture.registry, inputs, invocation, failures=failures, operation="initial-setup"
+            )
         assert prior.records[0].complete and len(prior.records[0].deferred) == 1
     _missing_vm_capture(fixture)
     if own_inputs:
@@ -128,7 +130,7 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
         write_capture(db, inputs.kind, inputs.name, component, captured, operation="local-refresh")
     expected_routing = setup_artifacts(db, fixture.registry, inputs, fixture.vm, "shell")
     assert expected_routing.unresolved_routes == {missing.identity}
-    actual = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup")
+    actual = run_setup_held(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup")
     record = actual.records[0]
     assert failures == [] and record.complete
     assert record.artifact_inputs is not None and missing.identity in record.artifact_inputs
@@ -151,7 +153,9 @@ def test_unreadable_explicit_input_is_forwarded_even_without_previous_result(
     # Restoring the source and applying the receiving facet replaces unknown
     # metadata with the known current handling result, without stale deferrals.
     write_capture(db, "vm", "vm", "vm", source, operation="source-repair")
-    healed = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="healed-setup").records[0]
+    healed = run_setup_held(
+        db, fixture.registry, inputs, invocation, failures=failures, operation="healed-setup"
+    ).records[0]
     assert healed.complete and not healed.deferred and not healed.incomplete_reasons
     assert healed.artifact_inputs is not None and missing.identity in healed.artifact_inputs
     assert not fixture.route().unresolved_routes
@@ -167,13 +171,15 @@ def test_unknown_input_set_records_source_repair_for_fresh_and_existing_receiver
     failures: list[SetupFailure] = []
     before = None
     if previous:
-        before = run_setup(
+        before = run_setup_held(
             db, fixture.registry, inputs, invocation, failures=failures, operation="initial-setup"
         ).records[0]
     fixture.registry.lookup("vm-template", "vm").harness_integrations["shell"] = CapabilityConfig()
     expected = setup_artifacts(db, fixture.registry, inputs, fixture.vm, "shell")
     assert expected.retain_previous and not expected.unresolved_routes and expected.unavailable_reasons
-    actual = run_setup(db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup").records[0]
+    actual = run_setup_held(
+        db, fixture.registry, inputs, invocation, failures=failures, operation="retry-setup"
+    ).records[0]
     assert failures == []
     assert actual.complete is (not previous)
     assert actual.artifact_inputs is not None

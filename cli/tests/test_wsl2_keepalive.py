@@ -306,7 +306,8 @@ def test_vm_stop_cannot_pass_admission_before_delayed_keeper_ack(tmp_path, db, m
     import threading
 
     from agentworks.db import Database, DesiredRuntimeState
-    from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+    from agentworks.native_locks import NativeLockBusyError, native_locks
+    from agentworks.native_locks.rows import vm_exclusive
     from agentworks.vms.manager import set_vm_desired_runtime_state
     from tests.vms.test_vm_nodes import _GatePlatform, _node, _seed
 
@@ -337,7 +338,7 @@ def test_vm_stop_cannot_pass_admission_before_delayed_keeper_ack(tmp_path, db, m
             other = Database(db.path)
             try:
                 set_vm_desired_runtime_state(other, name=vm.name, state=DesiredRuntimeState.STOPPED)
-            except NativeSetupBusyError:
+            except NativeLockBusyError:
                 refused.append(True)
             finally:
                 other.close()
@@ -350,7 +351,7 @@ def test_vm_stop_cannot_pass_admission_before_delayed_keeper_ack(tmp_path, db, m
         with node.hold_active():
             assert refused == [True]
             assert db.get_vm(vm.name).desired_runtime_state is DesiredRuntimeState.RUNNING
-            with native_mutation_guard(db.path, vm.name):
+            with native_locks(db.path, vm_exclusive(vm.name)):
                 pass
     finally:
         thread.join(timeout=3)

@@ -14,6 +14,7 @@ from agentworks.secrets.base import (
 from agentworks.secrets.orchestration import (
     SecretTarget,
     compute_needed_secrets,
+    require_targets_resolved,
     resolve_for_command,
 )
 from agentworks.secrets.outcomes import (
@@ -41,6 +42,7 @@ __all__ = [
     "SecretSourceDecl",
     "SecretTarget",
     "compute_needed_secrets",
+    "require_targets_resolved",
     "publish_builtin_secret_sources",
     "resolve_for_command",
     "validate_chain",

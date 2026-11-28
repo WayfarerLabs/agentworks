@@ -1,10 +1,14 @@
 """The operation log: one file per operation on a VM, and the record of each request in it.
 
 :class:`OperationLogFile` is the log a command writes, under :data:`LOG_DIR`
-as ``<vm>-<timestamp>-<stem>.log`` unless the caller names its path, and
-:func:`vm_logs` finds a VM's logs by that exact shape. Every byte the file
-receives passes through one sink that removes the secrets registered when
-the log was built, raw, shell-quoted and normalized.
+as ``<vm>-<timestamp>-<pid>-<suffix>-<stem>.log`` unless the caller names its
+path: the process id and a random six-hex-digit suffix keep two operations
+that start in the same second apart, and the file is created exclusively, so
+none ever appends to another's. :func:`vm_logs` finds a VM's logs by that
+exact shape and by ``<vm>-<timestamp>-<stem>.log``, the shape earlier
+releases wrote. Every byte the file receives passes through one sink that
+removes the secrets registered when the log was built, raw, shell-quoted and
+normalized.
 
 :func:`format_record` turns a request and its result into the block the log
 writes. It reads no environment value, script or program source or input,
@@ -16,7 +20,9 @@ written either.
 from __future__ import annotations
 
 import logging
+import os
 import re
+import secrets
 import shlex
 import sys
 import threading
@@ -41,20 +47,49 @@ _TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 # The digits and the uppercase T and Z of _TIMESTAMP_FORMAT. A VM name is
 # lowercase, so no name can contain this, and it anchors where one ends.
 _TIMESTAMP_PATTERN = r"[0-9]{8}T[0-9]{6}Z"
+# The process id and random suffix a log's name carries after its timestamp.
+# Logs written before they existed have neither, and still match.
+_UNIQUE_PATTERN = r"(?:[0-9]+-[0-9a-f]{6}-)?"
+
+
+def _random_suffix() -> str:
+    """Six hex digits drawn for one log name."""
+    return secrets.token_hex(3)
+
+
+def _create_log(vm_name: str, started: datetime, command_stem: str) -> Path:
+    """Create an empty log under :data:`LOG_DIR` with a name no other log has, and return its path.
+
+    The exclusive open fails on a name already taken, by this process's own
+    earlier log or another's, and a new suffix is drawn.
+    """
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    prefix = f"{vm_name}-{started.strftime(_TIMESTAMP_FORMAT)}-{os.getpid()}"
+    while True:
+        path = LOG_DIR / f"{prefix}-{_random_suffix()}-{command_stem}.log"
+        try:
+            path.open("x").close()
+        except FileExistsError:
+            continue
+        return path
 
 
 def vm_logs(vm_name: str, *, stem: str | None = None) -> list[Path]:
     """``vm_name``'s logs under :data:`LOG_DIR`, newest first, or only its ``stem`` logs when given.
 
-    A file counts only when its whole name is ``<vm_name>-<timestamp>-<stem>.log``,
-    so VM ``dev`` never claims VM ``dev-2``'s logs, and only when it is a file
+    A file counts only when its whole name is
+    ``<vm_name>-<timestamp>-<pid>-<suffix>-<stem>.log``, or
+    ``<vm_name>-<timestamp>-<stem>.log`` as earlier releases named it, so VM
+    ``dev`` never claims VM ``dev-2``'s logs, and only when it is a file
     or a link, which ``vm delete`` can unlink, never a directory so named. A
     missing directory has none.
     """
     if not LOG_DIR.is_dir():
         return []
     shape = re.compile(
-        rf"{re.escape(vm_name)}-{_TIMESTAMP_PATTERN}-{re.escape(stem) if stem is not None else '.+'}\.log", re.ASCII
+        rf"{re.escape(vm_name)}-{_TIMESTAMP_PATTERN}-{_UNIQUE_PATTERN}"
+        rf"{re.escape(stem) if stem is not None else '.+'}\.log",
+        re.ASCII,
     )
     return sorted(
         (path for path in LOG_DIR.iterdir() if shape.fullmatch(path.name) and (path.is_file() or path.is_symlink())),
@@ -87,7 +122,7 @@ class OperationLogFile:
         path: Path | None = None,
     ) -> None:
         started = datetime.now(tz=UTC)
-        self._path = path or LOG_DIR / f"{vm_name}-{started.strftime(_TIMESTAMP_FORMAT)}-{command_stem}.log"
+        self._path = path or _create_log(vm_name, started, command_stem)
         # Each write opens, writes and closes its own handler under the lock.
         # It orders nothing across processes.
         self._write_lock = threading.Lock()

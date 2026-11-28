@@ -472,3 +472,62 @@ def test_native_failure_preserves_workspace_and_continues_sibling_and_grants(
     assert not records["shell"].complete
     assert records["codex"].complete
     assert db.instance_state.get_desired_overlay("workspace", "project") is not None
+
+
+def test_create_refuses_a_grant_all_agent_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+
+    def grant_all_agent_arrives() -> None:
+        db.insert_agent("late", "box", "agt-late")
+        db.update_agent_grant_all("late", True)
+
+    ran = change_after_probe(monkeypatch, grant_all_agent_arrives)
+
+    with pytest.raises(StateConflictError):
+        workspace_manager.create_workspace(
+            db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.get_workspace("ws1") is None
+    assert "ws_name" not in mutation
+
+
+def test_create_refuses_a_vm_layer_replaced_while_its_secrets_resolved(
+    db: Database,
+    make_config,  # noqa: ANN001
+    mutation: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from agentworks.instance_specs import parse_instance_spec
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed_vm(db)
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_vm_layer_is_replaced(self: Resolver) -> None:
+        resolve(self)
+        db.instance_state.put_desired_overlay("vm", "box", parse_instance_spec("vm", '{"env":{"LATER":"y"}}').payload)
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_vm_layer_is_replaced)
+
+    with pytest.raises(StateConflictError):
+        workspace_manager.create_workspace(
+            db, config, name="ws1", vm_name="box", interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert db.get_workspace("ws1") is None
+    assert "ws_name" not in mutation

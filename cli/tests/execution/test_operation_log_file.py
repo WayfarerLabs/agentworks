@@ -9,6 +9,7 @@ the shared ``error.log`` at the top of the config dir.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from agentworks.execution.oplog import OperationLogFile
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import tzinfo
     from typing import Any
 
 
@@ -456,3 +458,49 @@ def test_a_missing_log_directory_has_no_logs(tmp_path: Path, monkeypatch: pytest
 
     assert oplog.vm_logs("dev") == []
     assert not os.path.exists(tmp_path / "absent")
+
+
+def test_two_logs_for_one_vm_and_stem_opened_in_the_same_second_write_separate_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FrozenClock(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> FrozenClock:
+            return cls(2026, 11, 2, 9, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    monkeypatch.setattr("agentworks.execution.oplog.datetime", FrozenClock)
+    first, second = OperationLogFile("dev", "session-start"), OperationLogFile("dev", "session-start")
+    assert first.path.name.startswith("dev-20261102T090000Z-")
+    assert second.path.name.startswith("dev-20261102T090000Z-")
+    first.output("first's line")
+    second.output("second's line")
+
+    assert first.path != second.path
+    assert "second's line" not in first.path.read_text()
+    assert "first's line" not in second.path.read_text()
+
+
+def test_a_taken_log_name_draws_another_suffix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    suffixes = iter(["aaaaaa", "aaaaaa", "bbbbbb"])
+    monkeypatch.setattr("agentworks.execution.oplog._random_suffix", lambda: next(suffixes))
+
+    first, second = OperationLogFile("dev", "workspace-create"), OperationLogFile("dev", "workspace-create")
+
+    assert first.path.name.endswith("-aaaaaa-workspace-create.log")
+    assert second.path.name.endswith("-bbbbbb-workspace-create.log")
+    assert first.path.read_text().count("# Log:") == 1
+
+
+def test_a_vms_logs_are_found_in_the_current_and_the_earlier_name_shape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("agentworks.execution.oplog.LOG_DIR", tmp_path)
+    earlier = tmp_path / "dev-20261101T090000Z-vm-create.log"
+    earlier.write_text("")
+    current = OperationLogFile("dev", "vm-create")
+    OperationLogFile("dev-2", "vm-create")
+
+    assert oplog.vm_logs("dev") == [current.path, earlier]
+    assert oplog.vm_logs("dev", stem="vm-create") == [current.path, earlier]

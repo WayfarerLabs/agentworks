@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from agentworks.capabilities.base import OperationScope
     from agentworks.config import Config
     from agentworks.db import Database, VMRow
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.resources import Registry
     from agentworks.secrets import SecretTarget
     from agentworks.secrets.policy import TtyInteractionPolicy
@@ -115,7 +114,6 @@ def _gated_vm_boundary(
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose a gated VM span after its caller selects SSH policy.
 
@@ -155,9 +153,16 @@ def _gated_vm_boundary(
     ordering (gate, then preflight, then resolve, all inside the span)
     changes the composition's shape rather than adding a flag to it.
 
+    Every command through here holds at least the vm shared, so the vm's
+    admission is probed before the gate: an access command, whose admission
+    is its whole lock, refuses a VM-wide operation before anything resolves.
+    The admission itself is the gate's keepalive hold
+    (``LiveVMNode.hold_active``), under a brief vm shared.
     """
     _warn_legacy_release(vm)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.native_locks.rows import admission
     from agentworks.orchestration.activation import (
         activation_gate,
         gate_secret_resolver,
@@ -168,8 +173,9 @@ def _gated_vm_boundary(
     from agentworks.secrets.resolver import Resolver
     from agentworks.vms.nodes import live_vm_node
 
+    probe_locks(db.path, admission(vm.name))
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -198,7 +204,6 @@ def gated_vm_boundary(
     targets: Sequence[SecretTarget] = (),
     scope: OperationScope | None = None,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
 ) -> Iterator[tuple[LiveVMNode, Resolver, RunContext]]:
     """Compose an ordinary VM gate after proving its canonical SSH identity."""
     require_vm_ssh_boundary(db, config, vm)
@@ -210,7 +215,6 @@ def gated_vm_boundary(
         targets=targets,
         scope=scope,
         interaction=interaction,
-        held_native_guard=held_native_guard,
     ) as boundary:
         yield boundary
 
@@ -241,7 +245,6 @@ def _live_vm_boundary(
     *,
     registry: Registry | None = None,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard | None = None,
 ) -> tuple[LiveVMNode, RunContext]:
     """The no-gate commands' shared composition root (``start_vm`` /
     ``stop_vm`` / ``delete_vm`` / ``describe_vm``, whose graphs are
@@ -275,7 +278,7 @@ def _live_vm_boundary(
     if registry is None:
         registry = load_request_registry(config, live_database=db)
     resolver = Resolver(config, registry, interaction=interaction)
-    vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
+    vm_node = live_vm_node(db, config, registry, vm)
     nodes = walk(vm_node)
     for secret_name in secret_union(nodes):
         resolver.register_name(secret_name)
@@ -298,7 +301,6 @@ def _auth_key_boundary(
     secret: str | None = None,
     prompt: bool = False,
     interaction: TtyInteractionPolicy,
-    held_native_guard: NativeMutationGuard,
 ) -> tuple[LiveVMNode, Resolver, RunContext, str]:
     """The composition root of a command whose planned op spends a Tailscale auth
     key (``vm rekey``, ``agw vm recover``).
@@ -312,8 +314,8 @@ def _auth_key_boundary(
     this call only (the persisted template is untouched); ``prompt`` routes the
     key alone to terminal entry, bypassing its configured sources, while every
     other secret resolves normally. The caller rejects the two together.
-    ``held_native_guard`` is the VM family guard the caller holds for the
-    whole command, which the live node's gate and hold share. Returns the live
+    Every prompt here runs unlocked; the caller takes its lock set
+    afterwards through ``vm_node.locked``. Returns the live
     node, the resolver (whose cache a later gate serves, and which the caller
     closes), the op-start context and the line-safe auth key; a failure here
     closes the resolver itself.
@@ -346,7 +348,7 @@ def _auth_key_boundary(
     prompt_names = frozenset((auth_key_name,)) if prompt else frozenset()
     resolver = Resolver(config, registry, interaction=interaction, prompt_names=prompt_names)
     try:
-        vm_node = live_vm_node(db, config, registry, vm, held_native_guard=held_native_guard)
+        vm_node = live_vm_node(db, config, registry, vm)
         nodes = walk(vm_template_node(template), vm_node)
         for secret_name in secret_union(nodes):
             resolver.register_name(secret_name)

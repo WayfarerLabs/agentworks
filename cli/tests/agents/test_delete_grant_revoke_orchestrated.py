@@ -148,7 +148,8 @@ class _FakeAdminGuest:
         if cmd is None or is_command_check(call.request):
             return None
         self.commands.append(cmd)
-        return guest_result(1 if owner_probe_line(cmd).startswith("test -e ") else 0)
+        # A stale-socket presence test finds nothing, and pgrep finds the account's processes gone.
+        return guest_result(1 if owner_probe_line(cmd).startswith(("test -e ", "pgrep ")) else 0)
 
 
 @pytest.fixture
@@ -383,7 +384,7 @@ def test_delete_stopped_vm_gate_burst_seeds_the_whole_union(
 # -- validation stays pre-gate ------------------------------------------------
 
 
-def test_delete_sessions_guard_refuses_with_zero_resolves_and_zero_gate(
+def test_delete_sessions_lock_refuses_with_zero_resolves_and_zero_gate(
     db: Database,
     make_config,  # noqa: ANN001
     resolve_counter: list[list[str]],
@@ -543,7 +544,7 @@ def test_delete_choreography_end_to_end_standalone(
     agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
 
     assert any("tmux -S /run/agentworks/agent-tmux-sockets/agt-a1/s1.sock kill-server" in c for c in target.commands)
-    assert any("gpasswd -d agt-a1 ws-ws1" in c for c in target.commands)
+    assert any("usermod -r -G ws-ws1 agt-a1" in c for c in target.commands)
     assert any("pkill -u agt-a1" in c for c in target.commands)
     assert any("userdel -r agt-a1" in c for c in target.commands)
     assert any("rm -rf -- /run/agentworks/agent-tmux-sockets/agt-a1" in c for c in target.commands)
@@ -556,6 +557,8 @@ def test_delete_choreography_end_to_end_standalone(
 
 
 SOCKET_DIR_REMOVAL = Command(("rm", "-rf", "--", "/run/agentworks/agent-tmux-sockets/agt-a1"), elevated=True)
+PKILL = Command(("pkill", "-u", "agt-a1"), elevated=True)
+PGREP = Command(("pgrep", "-u", "agt-a1"), elevated=True)
 USERDEL = Command(("userdel", "-r", "agt-a1"), elevated=True)
 
 
@@ -575,8 +578,12 @@ def _delete_on_recorder(
     assert vm is not None
     recorder = install_access_recorder(monkeypatch)
     recorder.access().respond(failing, outcome)
+    recorder.access().respond(PGREP, Result(Completed(1)))
 
-    agent_initializer.delete_agent_on_vm(vm, config, "agt-a1", logger=OperationLogFile("box", "test-delete-socket-dir"))
+    with contextlib.suppress(CommandFailed):
+        agent_initializer.delete_agent_on_vm(
+            vm, config, "agt-a1", agent_name="a1", logger=OperationLogFile("box", "test-delete-socket-dir")
+        )
 
     requests = recorder.requests("run")
     assert all(request.elevated for request in requests)
@@ -595,7 +602,7 @@ def test_delete_removes_per_agent_socket_dir_best_effort(
     the removal fails it does not abort the delete."""
     requests = _delete_on_recorder(db, make_config, monkeypatch, SOCKET_DIR_REMOVAL, Result(Completed(1)))
 
-    assert requests == [Command(("pkill", "-u", "agt-a1"), elevated=True), SOCKET_DIR_REMOVAL, USERDEL]
+    assert requests == [PKILL, SOCKET_DIR_REMOVAL, PGREP, USERDEL]
     assert captured_output.warnings == []
 
 
@@ -606,15 +613,12 @@ def test_delete_socket_dir_runs_even_when_userdel_fails(
     captured_output: CapturedOutput,
 ) -> None:
     """Regression (#296): a failing ``userdel`` must not skip the socket-dir
-    removal. ``userdel`` runs checked, so on failure it raises; because the
-    ``rm`` runs BEFORE it, the socket dir is already cleaned and does not
-    re-orphan under the freed uid. The delete still warns rather than aborts."""
-    failed = CommandFailed("box", 12, Result(Completed(12)), streams_logged=True)
-
-    requests = _delete_on_recorder(db, make_config, monkeypatch, USERDEL, failed)
+    removal. Because the ``rm`` runs BEFORE it, the socket dir is already
+    cleaned and does not re-orphan under the freed uid when ``userdel``
+    fails."""
+    requests = _delete_on_recorder(db, make_config, monkeypatch, USERDEL, Result(Completed(12)))
 
     assert requests.index(SOCKET_DIR_REMOVAL) < requests.index(USERDEL)
-    assert captured_output.warnings
 
 
 def test_delete_nested_platform_path_reuses_the_callers_composition(
@@ -672,7 +676,7 @@ def test_delete_nested_rejects_a_mismatched_vm_node(
     """Enforce-invariants pin: a teardown must hand ``delete_agent`` the
     agent's OWN vm node. A node for a different VM would hold that VM
     active while the delete body issues SSH + DB work against the agent's
-    real VM, a silent footgun; the guard raises a typed ``StateError``
+    real VM, a silent footgun; the lock raises a typed ``StateError``
     before the hold is ever entered."""
     config = make_config()
     _seed(db)  # a1 on 'box'
@@ -768,7 +772,7 @@ def test_revoke_named_workspace_with_implicit_access_keeps_membership(
     )
 
     assert db.has_any_grant("a1", "ws1")  # the implicit grant survives
-    assert not any("gpasswd" in c for c in target.commands)
+    assert not any(c.startswith("usermod -r") for c in target.commands)
     assert "Revoked: ws1 (still has implicit access via sessions)" in captured_output.info
 
 
@@ -809,7 +813,175 @@ def test_revoke_all_warns_about_remaining_implicit_access(
     assert not db.has_any_grant("a1", "ws2")
     # ws2's only grant was explicit, so with it gone the agent is removed
     # from ws2's group; ws1 still has its implicit grant, so it is not.
-    assert any("gpasswd -d agt-a1 ws-ws2" in c for c in target.commands)
+    assert any("usermod -r -G ws-ws2 agt-a1" in c for c in target.commands)
     assert not any("ws-ws1" in c for c in target.commands)
     assert "All explicit grants revoked for agent 'a1'" in captured_output.info
     assert "agent still has implicit access via sessions to: ws1" in captured_output.warnings
+
+
+def test_delete_asks_and_resolves_with_nothing_locked_then_refuses_a_session_added_since(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The confirmation named no sessions; one created after it is not what
+    the operator confirmed, so the delete refuses before any VM work."""
+    from agentworks import output as output_mod
+    from agentworks.errors import StateConflictError
+    from agentworks.native_locks import native_locks
+    from agentworks.native_locks.rows import vm_exclusive
+    from agentworks.secrets.resolver import Resolver
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    unlocked: list[str] = []
+
+    def confirm(message: str, default: bool = False) -> bool:
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("confirm")
+        return True
+
+    resolve = Resolver.resolve
+
+    def resolve_then_a_session_appears(self: Resolver) -> None:
+        with native_locks(db.path, vm_exclusive("box")):
+            unlocked.append("resolve")
+        resolve(self)
+        _seed_live_session(db, name="late", ws="ws1", agent="a1")
+
+    monkeypatch.setattr(output_mod, "confirm", confirm)
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_a_session_appears)
+
+    with pytest.raises(StateConflictError):
+        agent_manager.delete_agent(db, config, name="a1", force=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert unlocked == ["confirm", "resolve"]
+    assert target.commands == []
+    assert db.get_agent("a1") is not None
+
+
+# -- the lock set rebuilt under itself ------------------------------------------
+
+
+def test_grant_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.grant_workspaces(
+            db, config, agent_name="a1", workspace_names=[], grant_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    row = db.get_agent("a1")
+    assert row is not None and not row.grant_all
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
+def test_revoke_all_refuses_a_workspace_created_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named revoke locks the grants it names whatever the rows say; ``--all`` locks every workspace it reads."""
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    db.insert_agent_grant("a1", "ws1", "explicit")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: _seed_workspace(db, vm_name="box", name="late"))
+
+    with pytest.raises(StateConflictError):
+        agent_grants.revoke_workspaces(
+            db, config, agent_name="a1", workspace_names=[], revoke_all=True, interaction=TtyInteractionPolicy.REFUSE
+        )
+
+    assert ran
+    assert db.has_any_grant("a1", "ws1")
+    assert not any(c.startswith("usermod") for c in target.commands)
+
+
+def test_delete_refuses_a_grant_added_between_its_probe_and_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentworks.errors import StateConflictError
+    from tests.conftest import change_after_probe
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _reachable(monkeypatch, True)
+    ran = change_after_probe(monkeypatch, lambda: db.insert_agent_grant("a1", "ws1", "explicit"))
+
+    with pytest.raises(StateConflictError):
+        agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert ran
+    assert db.get_agent("a1") is not None
+    assert not any("userdel" in c for c in target.commands)
+
+
+def test_delete_tears_down_the_session_rows_as_they_are_under_its_lock(
+    db: Database,
+    make_config,  # noqa: ANN001
+    target: _FakeAdminGuest,
+    synced: list[object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A session whose recorded runtime changed after the confirmation is torn down by its current row."""
+    from agentworks.secrets.resolver import Resolver
+    from agentworks.sessions import manager as sessions_manager
+
+    config = make_config()
+    _seed(db)
+    _seed_workspace(db, vm_name="box", name="ws1")
+    _seed_live_session(db, name="s1", ws="ws1", agent="a1")
+    _reachable(monkeypatch, True)
+    resolve = Resolver.resolve
+
+    def resolve_then_the_session_restarts(self: Resolver) -> None:
+        resolve(self)
+        before = db.get_session("s1")
+        assert before is not None
+        db.update_session_runtime(
+            "s1",
+            socket_path=before.socket_path,
+            pid=5151,
+            boot_id=before.boot_id,
+            tmux_server_start_ticks=before.tmux_server_start_ticks,
+        )
+
+    monkeypatch.setattr(Resolver, "resolve", resolve_then_the_session_restarts)
+    monkeypatch.setattr(sessions_manager, "ensure_pids_batch", lambda sessions, **k: sessions)
+    torn_down: list[int | None] = []
+
+    monkeypatch.setattr(
+        sessions_manager, "_teardown_session", lambda session, **k: torn_down.append(getattr(session, "pid", None))
+    )
+
+    agent_manager.delete_agent(db, config, name="a1", force=True, yes=True, interaction=TtyInteractionPolicy.REFUSE)
+
+    assert torn_down == [5151]
+    assert db.get_agent("a1") is None

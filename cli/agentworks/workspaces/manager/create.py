@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -232,6 +233,12 @@ def create_workspace(
     ensure_effective_references_enabled(registry, pending.outbound)
     _guard_vm_status(vm)
 
+    from agentworks.native_locks import probe_locks
+    from agentworks.workspaces.locks import workspace_create_request
+
+    request = workspace_create_request(db, vm, ws_name)
+    probe_locks(db.path, request)
+
     # BUILD: the command names its direct resources (this VM, the
     # chosen workspace name) and constructs the pending workspace node
     # with its VM edge attached; the walk assembles the graph.
@@ -268,7 +275,10 @@ def create_workspace(
         resolver.register_name(secret_name)
 
     from agentworks.harness_setup.lifecycle import prepare_workspace_setup
+    from agentworks.recheck import layer_inputs
 
+    # The VM's layers the setup is prepared from, compared again under the set.
+    layers = layer_inputs(db, vm)
     setup_inputs = prepare_workspace_setup(
         db, registry, vm=vm, name=ws_name, template=template, root=pending_workspace.workspace_path
     )
@@ -280,7 +290,10 @@ def create_workspace(
     from agentworks.vms.manager import require_vm_ssh_boundary
 
     require_vm_ssh_boundary(db, config, vm)
-    with activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)):
+    with (
+        contextlib.ExitStack() as stack,
+        activation_gate(vm_node, gate_secret_resolver(config, registry, resolver)),
+    ):
         # The preflight boundary: the sweep covers every participating
         # node, then the site's config secrets resolve in one pass (or
         # arrive pre-seeded from the gate). This command has never
@@ -294,7 +307,29 @@ def create_workspace(
         )
         resolver.resolve()
 
+        from agentworks.recheck import (
+            require_layers_unchanged,
+            require_request_unchanged,
+            require_unchanged,
+            require_vm_unchanged,
+            workspace_fields,
+        )
+        from agentworks.workspaces.locks import (
+            require_trees_unchanged,
+            walk_trees,
+            with_trees,
+        )
         from agentworks.workspaces.realize import realize_workspace
+
+        # The walk and the body run on the row the gate admitted, the one compared under the set.
+        vm = vm_node.row
+        trees = walk_trees(vm, config, [pending_workspace.workspace_path])
+        held = stack.enter_context(vm_node.locked(with_trees(request, trees)))
+        require_vm_unchanged(db, vm)
+        require_layers_unchanged(db, "workspace", ws_name, layers, vm_name=vm.name)
+        require_unchanged("workspace", ws_name, None, workspace_fields(db.get_workspace(ws_name)))
+        require_request_unchanged("vm", vm.name, request, workspace_create_request(db, vm, ws_name))
+        require_trees_unchanged(vm, config, trees)
 
         setup_failures: list[SetupFailure] = []
         vscode_path = realize_workspace(
@@ -308,6 +343,7 @@ def create_workspace(
             setup_inputs=setup_inputs,
             setup_values=resolver.values,
             overlay=overlay,
+            held=held,
         )
         # Bookkeeping only, deliberately not via a realization log:
         # this command never unwinds a realized workspace (a failure

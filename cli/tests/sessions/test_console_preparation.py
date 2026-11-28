@@ -10,10 +10,12 @@ import agentworks.bootstrap as bootstrap
 from agentworks.db import DesiredRuntimeState
 from agentworks.errors import StateError, UserAbort, ValidationError
 from agentworks.execution.access import Admin
-from agentworks.harness_setup.locking import NativeSetupBusyError, native_mutation_guard
+from agentworks.native_locks import native_locks
+from agentworks.native_locks.rows import vm_exclusive
 from agentworks.sessions import multi_console as mc
 from agentworks.sessions.tmux import ProbeStatus
 from tests._consoles_support import _seed_sessions, _seed_vm, _stub_build_registry, _StubConfig  # noqa: F401
+from tests.conftest import locking_node
 from tests.console_helpers import create_console_record
 from tests.vm_access_support import RecordingVMAccess, install_access_recorder
 
@@ -56,7 +58,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
     calls = []
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (canonical, staging))
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: calls.append("collect") or [])
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -64,7 +66,7 @@ def test_prepare_classifies_without_mutation(db: Database, monkeypatch, canonica
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=lock,
         )
         assert prepared.action is action
         assert calls == (["collect"] if collect else [])
@@ -83,7 +85,7 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
     monkeypatch.setattr(mc, "_console_runtime_presence", lambda *a: (canonical, staging))
     monkeypatch.setattr(mc, "_console_build_secret_targets", lambda *a, **kw: pytest.fail("collected secrets"))
-    with mc.guarded_console_selection(db, "con") as (console, guard), pytest.raises(StateError):
+    with mc.locked_console(db, "con") as (console, lock), pytest.raises(StateError):
         mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -91,11 +93,11 @@ def test_unknown_never_collects_or_changes_runtime(db: Database, monkeypatch, ca
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=lock,
         )
 
 
-def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, monkeypatch):
+def test_cleanup_only_preserves_canonical_and_requires_live_lock(db: Database, monkeypatch):
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     registry = bootstrap.load_request_registry(_StubConfig(), live_database=db)
@@ -106,7 +108,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
     monkeypatch.setattr(attach, "_teardown_console_staging", lambda *a: changed.append("staging"))
     monkeypatch.setattr(mc, "_teardown_console_tmux", lambda *a: pytest.fail("canonical teardown"))
     monkeypatch.setattr(mc, "_build_console_tmux", lambda *a, **kw: pytest.fail("built canonical"))
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -114,7 +116,7 @@ def test_cleanup_only_preserves_canonical_and_requires_live_guard(db: Database, 
             console=console,
             vm=_vm(db),
             admin=RecordingVMAccess([], Admin()),
-            held_native_guard=guard,
+            held=lock,
         )
         assert not changed
         assert mc.execute_console_reconcile(prepared, values={})
@@ -136,21 +138,24 @@ def test_intent_is_local_kind_strict_and_preserves_members(db: Database):
     assert _console(db).desired_runtime_state is DesiredRuntimeState.STOPPED
 
 
-def test_delete_consent_holds_family_guard_and_nested_reuses_it(db: Database, monkeypatch):
+def test_delete_consent_is_asked_unlocked_and_a_member_change_before_the_lock_refuses(db: Database, monkeypatch):
+    from agentworks.errors import StateConflictError
+
     _seed_vm(db)
+    _seed_sessions(db, ["alpha"])
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     from agentworks import output
 
     def confirm(_prompt):
-        with pytest.raises(NativeSetupBusyError), native_mutation_guard(db.path, "vm1"):
-            pass
+        with native_locks(db.path, vm_exclusive("vm1")):
+            db.add_console_session("con", "alpha", [])
         return True
 
     monkeypatch.setattr(output, "confirm", confirm)
     monkeypatch.setattr(mc, "_live_access", lambda *a: None)
-    with native_mutation_guard(db.path, "vm1") as guard:
-        mc.delete_console(db, _StubConfig(), name="con", held_native_guard=guard)
-    assert db.get_console("con") is None
+    with pytest.raises(StateConflictError):
+        mc.delete_console(db, _StubConfig(), name="con")
+    assert db.get_console("con") is not None
 
 
 def test_delete_cancellation_propagates_and_retains_definition(db: Database, monkeypatch):
@@ -181,7 +186,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
     monkeypatch.setattr(mc, "_resolve_admin_env", lambda *a, **kw: {"TOKEN": kw["values"]["token"]})
     guest = install_scripted_guest(monkeypatch, _ScriptedGuest(model=TmuxModel()))
     admin = guest.admin()
-    with mc.guarded_console_selection(db, "con") as (console, guard):
+    with mc.locked_console(db, "con") as (console, lock):
         prepared = mc.prepare_console_reconcile(
             db,
             _StubConfig(),  # type: ignore[arg-type]
@@ -189,7 +194,7 @@ def test_admin_only_env_is_parked_for_its_window_and_never_logged(db: Database, 
             console=console,
             vm=_vm(db),
             admin=admin,
-            held_native_guard=guard,
+            held=lock,
         )
         assert mc.execute_console_reconcile(prepared, values={"token": value})
         assert mc.observe_prepared_console(prepared).value == "running"
@@ -291,7 +296,7 @@ def test_stop_off_parent_accepts_without_transport_activation_or_hold(db: Databa
     _seed_vm(db)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
     calls = []
-    node = SimpleNamespace(hold_active=lambda: pytest.fail("opened a VM hold"))
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.STOPPED, clear_values=lambda: calls.append("clear"))
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: context)
@@ -360,21 +365,26 @@ def test_known_preflight_refusal_preserves_console_target(db: Database, scripted
     assert _console(db) == before
 
 
-def test_focused_selection_refuses_reparent_before_guarded_reread(db: Database, monkeypatch):
+def test_focused_selection_refuses_reparent_before_locked_reread(db: Database, monkeypatch):
     from contextlib import contextmanager
 
     _seed_vm(db)
     _seed_vm(db, "vm2")
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
 
+    import agentworks.native_locks as native_locks
+
+    original = native_locks.native_locks
+
     @contextmanager
-    def changing_parent(path, vm_name, *, held=None):
-        assert vm_name == "vm1"
+    def changing_parent(path, request, **kwargs):
+        assert request.vm == "vm1"
         db._conn.execute("UPDATE consoles SET vm_name = 'vm2' WHERE name = 'con'")
         db._conn.commit()
-        yield object()
+        with original(path, request, **kwargs) as held:
+            yield held
 
-    monkeypatch.setattr("agentworks.harness_setup.locking.native_mutation_guard", changing_parent)
+    monkeypatch.setattr(native_locks, "native_locks", changing_parent)
     with pytest.raises(StateError):
         mc.set_console_desired_runtime_state(db, name="con", state="stopped")
     assert _console(db).desired_runtime_state is DesiredRuntimeState.RUNNING
@@ -391,7 +401,7 @@ def test_stop_guest_disappearance_requires_conclusive_provider_off(db: Database,
 
     _seed_vm(db, with_tailscale=True)
     create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
-    node = SimpleNamespace(hold_active=lambda: pytest.fail("opened hold"))
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened hold"))
     context = SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
     monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
     monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
@@ -447,7 +457,7 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
     from agentworks.execution.errors import TrustMissing
     from agentworks.plugins.proxmox.platform import ProxmoxPlatform
     from agentworks.secrets.policy import TtyInteractionPolicy
-    from tests.runtime_state.test_composition import seed_vm
+    from tests.runtime_state.runtime_support import seed_vm
 
     seed_vm(db, "vm1", target=parent_target)
     _seed_sessions(db, ["alpha"])
@@ -468,5 +478,282 @@ def test_missing_host_record_refuses_console_start_before_accepting_intent(
         mc.start_console(db, make_config(), name="con", interaction=TtyInteractionPolicy.REFUSE)
 
     assert (_vm(db), _console(db), _session(db), db.list_console_sessions("con"), db._conn.total_changes) == before
-    with native_mutation_guard(db.path, "vm1"):
+    with native_locks(db.path, vm_exclusive("vm1")):
         pass
+
+
+@pytest.mark.parametrize(
+    ("operation", "previous", "restore"),
+    [
+        ("start", DesiredRuntimeState.STOPPED, ("agw", "console", "set-desired-state", "con", "stopped")),
+        ("start", None, ()),
+        ("start", DesiredRuntimeState.RUNNING, None),
+        ("stop", DesiredRuntimeState.RUNNING, ("agw", "console", "set-desired-state", "con", "running")),
+        ("stop", None, ()),
+        ("stop", DesiredRuntimeState.STOPPED, None),
+    ],
+    ids=["start-stopped", "start-legacy-null", "start-unchanged", "stop-running", "stop-legacy-null", "stop-unchanged"],
+)
+def test_a_console_refused_after_recording_its_intent_says_how_to_restore_it(
+    db: Database, monkeypatch, operation, previous, restore
+):
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.native_locks import NativeLockBusyError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.multi_console._helpers import console_request
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    db._conn.execute("UPDATE consoles SET desired_runtime_state = ? WHERE name = 'con'", (previous and previous.value,))
+    db._conn.commit()
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    with ExitStack() as other_operation:
+
+        def prepare_then_another_operation_takes_the_console(*args, **kwargs):
+            # Between the brief intent write and the final set, another operation takes the console.
+            other_operation.enter_context(native_locks(db.path, console_request(db, _console(db))))
+            return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+        monkeypatch.setattr(
+            "agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_another_operation_takes_the_console
+        )
+        command = mc.start_console if operation == "start" else mc.stop_console
+        with pytest.raises(NativeLockBusyError) as refused:
+            command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+    assert refused.value.restore_intent == restore
+    recorded = DesiredRuntimeState.RUNNING if operation == "start" else DesiredRuntimeState.STOPPED
+    assert _console(db).desired_runtime_state is recorded
+
+
+@pytest.mark.parametrize(
+    ("operation", "restore"),
+    [
+        ("start", ("agw", "console", "set-desired-state", "con", "stopped")),
+        ("stop", ("agw", "console", "set-desired-state", "con", "running")),
+    ],
+    ids=["start", "stop"],
+)
+def test_a_console_whose_vm_changed_before_its_final_set_refuses_and_says_how_to_restore_its_intent(
+    db: Database, monkeypatch, operation, restore
+):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+
+    def prepare_then_the_vm_is_readdressed(*args, **kwargs):
+        # A rekey or recover lands after the gate admitted the row and before the final set.
+        db.update_vm_tailscale("vm1", "100.64.0.77")
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_the_vm_is_readdressed)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "vm"
+    assert refused.value.restore_intent == restore
+
+
+@pytest.mark.parametrize("busy", [False, True], ids=["changed", "busy"])
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_whose_intent_another_command_replaced_gives_no_restore_words(
+    db: Database, monkeypatch, operation, busy
+):
+    from contextlib import ExitStack
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+    from agentworks.sessions.multi_console._helpers import console_request
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    with ExitStack() as other_operation:
+
+        def prepare_then_another_command_records_the_old_intent(*args, **kwargs):
+            # After the brief write, another command puts the old intent back (and, if busy, still holds the console).
+            db.set_console_desired_runtime_state("con", previous)
+            if busy:
+                other_operation.enter_context(native_locks(db.path, console_request(db, _console(db))))
+            return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+        monkeypatch.setattr(
+            "agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_another_command_records_the_old_intent
+        )
+        command = mc.start_console if operation == "start" else mc.stop_console
+        with pytest.raises(StateError) as refused:
+            command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert getattr(refused.value, "restore_intent", None) is None
+    assert refused.value.entity_kind == "console"
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_recreated_under_its_name_before_its_final_set_refuses_without_restore_words(
+    db: Database, monkeypatch, operation
+):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    recorded = DesiredRuntimeState.RUNNING if operation == "start" else DesiredRuntimeState.STOPPED
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.execution.vm_access", lambda *a, **kw: pytest.fail("acted on the replacement"))
+
+    def prepare_then_the_console_is_recreated(*args, **kwargs):
+        # While the gate prompts, the console is deleted and another created under its name, with the same intent.
+        db.delete_console("con")
+        create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=False)
+        db.set_console_desired_runtime_state("con", recorded)
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", prepare_then_the_console_is_recreated)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+    assert refused.value.restore_intent is None
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_recreated_on_another_vm_during_preflight_refuses_before_recording_intent(
+    db: Database, monkeypatch, operation
+):
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_vm(db, "vm2", with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    previous = DesiredRuntimeState.STOPPED if operation == "start" else DesiredRuntimeState.RUNNING
+    db.set_console_desired_runtime_state("con", previous)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+
+    def preflight_then_the_console_is_recreated_on_vm2(*args, **kwargs):
+        # While the VM's policies are checked, the console is deleted and another created under its name on vm2.
+        db.delete_console("con")
+        create_console_record(db, name="con", vm_name="vm2", session_specs=[], add_admin_shell=True)
+        db.set_console_desired_runtime_state("con", previous)
+        return node
+
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", preflight_then_the_console_is_recreated_on_vm2)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.runtime.prepare_vm_runtime", lambda *a, **kw: pytest.fail("prepared the VM")
+    )
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(StateConflictError) as refused:
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert refused.value.entity_kind == "console"
+    assert _console(db).vm_name == "vm2"
+    assert _console(db).desired_runtime_state is previous
+
+
+@pytest.mark.parametrize("operation", ["start", "stop"])
+def test_a_console_runtime_command_runs_on_the_vm_row_its_gate_admitted(db: Database, monkeypatch, operation):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    class _Stop(Exception):
+        pass
+
+    _seed_vm(db, with_tailscale=True)
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    node = locking_node(db, db.get_vm("vm1"), hold_active=nullcontext)
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+
+    def readdressed_before_the_gate_admits_it(*args, **kwargs):
+        # A rekey or recover lands after the command read the VM; the gate admits the new row.
+        db.update_vm_tailscale("vm1", "100.64.0.77")
+        node.row = _vm(db)
+        return SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None)
+
+    monkeypatch.setattr("agentworks.vms.manager.runtime.prepare_vm_runtime", readdressed_before_the_gate_admits_it)
+    reached: list[str | None] = []
+
+    def vm_access(vm, *args, **kwargs):
+        reached.append(vm.tailscale_host)
+        raise _Stop
+
+    monkeypatch.setattr("agentworks.execution.vm_access", vm_access)
+    command = mc.start_console if operation == "start" else mc.stop_console
+    with pytest.raises(_Stop):
+        command(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)
+    assert reached == ["100.64.0.77"]
+
+
+def test_a_console_start_refuses_a_member_added_as_its_final_set_is_taken(db: Database, monkeypatch):
+    from types import SimpleNamespace
+
+    import agentworks.sessions.multi_console.lifecycle as lifecycle
+    from agentworks.db import VMStatus
+    from agentworks.errors import StateConflictError
+    from agentworks.secrets.policy import TtyInteractionPolicy
+
+    _seed_vm(db, with_tailscale=True)
+    _seed_sessions(db, ["late"])
+    create_console_record(db, name="con", vm_name="vm1", session_specs=[], add_admin_shell=True)
+    from agentworks import native_locks as locks
+
+    node = locking_node(db, db.get_vm("vm1"), hold_active=lambda: pytest.fail("opened a VM hold"))
+    lock = locks.native_locks
+
+    def another_edit_adds_a_member_then_lock(*args, **kwargs):
+        # Between building the console's request and holding it, another edit adds a member.
+        if db.get_console_session("con", "late") is None:
+            db.add_console_session("con", "late", [])
+        return lock(*args, **kwargs)
+
+    monkeypatch.setattr(locks, "native_locks", another_edit_adds_a_member_then_lock)
+    monkeypatch.setattr(lifecycle, "preflight_console_vm", lambda *a, **kw: node)
+    monkeypatch.setattr("agentworks.vms.manager.require_vm_ssh_boundary", lambda *a, **kw: None)
+    monkeypatch.setattr("agentworks.vms.manager.runtime.activate_vm_runtime", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        "agentworks.vms.manager.runtime.prepare_vm_runtime",
+        lambda *a, **kw: SimpleNamespace(node=node, observed_status=VMStatus.RUNNING, clear_values=lambda: None),
+    )
+    with pytest.raises(StateConflictError):
+        mc.start_console(db, _StubConfig(), name="con", interaction=TtyInteractionPolicy.REFUSE)

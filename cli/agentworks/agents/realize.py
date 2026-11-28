@@ -50,9 +50,9 @@ if TYPE_CHECKING:
     from agentworks.db import AgentRow, Database, VMRow
     from agentworks.git_credentials import CredentialRequest
     from agentworks.harness_setup.inputs import SetupInputs
-    from agentworks.harness_setup.locking import NativeMutationGuard
     from agentworks.harness_setup.outcomes import SetupFailure
     from agentworks.instance_specs import InstanceOverlay
+    from agentworks.native_locks import NativeLockSet
     from agentworks.resources.registry import Registry
 
     from .templates import ResolvedAgentTemplate
@@ -74,7 +74,7 @@ def realize_agent(
     setup_failures: list[SetupFailure],
     setup_inputs: SetupInputs | None = None,
     setup_values: Mapping[str, str] | None = None,
-    held_native_guard: NativeMutationGuard | None = None,
+    held: NativeLockSet,
 ) -> AgentRow:
     """Make agent ``name`` real on ``vm``: create and configure the
     Linux user (including the git-credential materials, their write-step
@@ -85,6 +85,9 @@ def realize_agent(
     half-configured user); the caller's realization log never sees a
     half-made agent. Native setup failures join ``setup_failures`` while the
     agent row and completed setup progress are committed. Returns the inserted row.
+
+    Runs under the caller's ``held`` set, which must cover
+    :func:`agentworks.agents.locks.agent_create_request`; it acquires nothing.
     """
     # DRIFT GUARD (Phase 7, recipe use-gate): this choreography is itself never
     # gated; the recipe gate (``ensure_recipe_enabled``) lives at each COMMAND
@@ -105,7 +108,7 @@ def realize_agent(
         # exception. Surface them as a warning and let the original error
         # continue to propagate.
         try:
-            delete_agent_on_vm(vm, config, linux_user, logger=log)
+            delete_agent_on_vm(vm, config, linux_user, agent_name=name, logger=log)
         except Exception as cleanup_err:
             output.warn(
                 f"rollback during agent create failed: {cleanup_err}. "
@@ -113,130 +116,131 @@ def realize_agent(
                 f"Operation log: {log.display_path}"
             )
 
+    from agentworks.agents.locks import agent_create_request
     from agentworks.harness_setup.lifecycle import require_prepared_setup
-    from agentworks.harness_setup.locking import native_mutation_guard
 
-    with native_mutation_guard(db.path, vm.name, held=held_native_guard) as guard:
-        require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
-        log = OperationLogFile(
-            vm.name,
-            "agent-create",
-            redactions=tuple(
-                dict.fromkeys((*credential_redactions, *((setup_values or {}).values() if setup_inputs else ())))
-            ),
-        )
-        # The logger's close() writes a "Finished" footer; defer it via finally so
-        # rollback commands are logged BEFORE the footer, not after.
+    request = agent_create_request(db, vm, name, grant_all=grant_all_workspaces)
+    held.require(request, database_path=db.path)
+    require_prepared_setup(db, "agent", name, ("agent",), () if setup_inputs is None else (setup_inputs,))
+    log = OperationLogFile(
+        vm.name,
+        "agent-create",
+        redactions=tuple(
+            dict.fromkeys((*credential_redactions, *((setup_values or {}).values() if setup_inputs else ())))
+        ),
+    )
+    # The logger's close() writes a "Finished" footer; defer it via finally so
+    # rollback commands are logged BEFORE the footer, not after.
+    try:
+        create_new_agent_user(vm, config, linux_user, shell=template.shell, logger=log)
         try:
-            create_new_agent_user(vm, config, linux_user, shell=template.shell, logger=log)
-            try:
-                from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
+            from agentworks.vms.admin_templates import resolve_live_template as resolve_admin_template
 
-                create_agent_on_vm(
-                    vm,
+            create_agent_on_vm(
+                vm,
+                config,
+                registry,
+                template,
+                linux_user,
+                agent_name=name,
+                credential_requests=credential_requests,
+                logger=log,
+                admin_git_force_safe_directory=resolve_admin_template(
+                    db,
+                    registry,
+                    vm.name,
+                    vm.admin_template,
+                ).git_force_safe_directory,
+            )
+
+            native_setup = None
+            if setup_inputs is not None:
+                from agentworks.harness_setup.lifecycle import apply_agent_setup
+
+                native_setup = apply_agent_setup(
+                    db,
                     config,
                     registry,
-                    template,
-                    linux_user,
-                    agent_name=name,
-                    credential_requests=credential_requests,
+                    inputs=setup_inputs,
+                    failures=setup_failures,
+                    vm=vm,
+                    username=linux_user,
+                    values=setup_values or {},
                     logger=log,
-                    admin_git_force_safe_directory=resolve_admin_template(
-                        db,
-                        registry,
-                        vm.name,
-                        vm.admin_template,
-                    ).git_force_safe_directory,
+                    held=held,
+                    operation="agent-create",
+                    buffered=True,
                 )
 
-                native_setup = None
-                if setup_inputs is not None:
-                    from agentworks.harness_setup.lifecycle import apply_agent_setup
+            from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
 
-                    native_setup = apply_agent_setup(
-                        db,
-                        config,
-                        registry,
-                        inputs=setup_inputs,
-                        failures=setup_failures,
-                        vm=vm,
-                        username=linux_user,
-                        values=setup_values or {},
-                        logger=log,
-                        held=guard,
-                        operation="agent-create",
-                        buffered=True,
-                    )
+            with db.transaction():
+                refuse_orphan_creation_state(db, "agent", name)
+                agent = db.insert_agent(
+                    name,
+                    vm.name,
+                    linux_user,
+                    template=template.name,
+                    grant_all=grant_all_workspaces,
+                )
+                overlay_outcome = persist_creation_overlay(db, "agent", name, overlay)
+                if native_setup is not None:
+                    from agentworks.harness_setup.state import write_native_setup
 
-                from agentworks.instance_specs import persist_creation_overlay, refuse_orphan_creation_state
+                    write_native_setup(db, "agent", name, native_setup, operation="agent-create")
+                    if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
+                        from agentworks.artifacts.state import write_capture
 
-                with db.transaction():
-                    refuse_orphan_creation_state(db, "agent", name)
-                    agent = db.insert_agent(
-                        name,
-                        vm.name,
-                        linux_user,
-                        template=template.name,
-                        grant_all=grant_all_workspaces,
-                    )
-                    overlay_outcome = persist_creation_overlay(db, "agent", name, overlay)
-                    if native_setup is not None:
-                        from agentworks.harness_setup.state import write_native_setup
+                        write_capture(
+                            db, "agent", name, "agent", setup_inputs.artifact_snapshot, operation="agent-create"
+                        )
+        except KeyboardInterrupt:
+            output.warn(f"Cancelling agent create '{name}'... rolling back.")
+            _safe_rollback()
+            raise
+        except AgentworksError as error:
+            _safe_rollback()
+            if error.entity_kind is None and error.entity_name is None:
+                error.entity_kind = "agent"
+                error.entity_name = name
+            raise
+        except Exception as e:
+            _safe_rollback()
+            raise ExternalError(
+                f"creating agent: {e}",
+                entity_kind="agent",
+                entity_name=name,
+                hint=f"Operation log: {log.display_path}",
+            ) from e
+    finally:
+        try:
+            log.close()
+        except BaseException:
+            if not defer_overlay_report:
+                from agentworks.instance_specs import render_retained_creation_overlay
 
-                        write_native_setup(db, "agent", name, native_setup, operation="agent-create")
-                        if setup_inputs is not None and setup_inputs.artifact_snapshot is not None:
-                            from agentworks.artifacts.state import write_capture
+                render_retained_creation_overlay(db, "agent", name)
+            raise
 
-                            write_capture(
-                                db, "agent", name, "agent", setup_inputs.artifact_snapshot, operation="agent-create"
-                            )
-            except KeyboardInterrupt:
-                output.warn(f"Cancelling agent create '{name}'... rolling back.")
-                _safe_rollback()
-                raise
-            except AgentworksError as error:
-                _safe_rollback()
-                if error.entity_kind is None and error.entity_name is None:
-                    error.entity_kind = "agent"
-                    error.entity_name = name
-                raise
-            except Exception as e:
-                _safe_rollback()
-                raise ExternalError(
-                    f"creating agent: {e}",
-                    entity_kind="agent",
-                    entity_name=name,
-                    hint=f"Operation log: {log.display_path}",
-                ) from e
-        finally:
-            try:
-                log.close()
-            except BaseException:
-                if not defer_overlay_report:
-                    from agentworks.instance_specs import render_retained_creation_overlay
+    from agentworks.instance_specs import report_overlay_outcome
 
-                    render_retained_creation_overlay(db, "agent", name)
-                raise
+    with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
+        # If grant_all, add to all existing workspace groups
+        if grant_all_workspaces:
+            from agentworks.agents.grants import add_to_workspace_group
 
-        from agentworks.instance_specs import report_overlay_outcome
+            for ws in db.list_workspaces(vm_name=vm.name):
+                add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
+                db.insert_agent_grant(name, ws.name, "explicit")
 
-        with report_overlay_outcome(None if defer_overlay_report else overlay_outcome):
-            # If grant_all, add to all existing workspace groups
-            if grant_all_workspaces:
-                from agentworks.agents.grants import add_to_workspace_group
+        # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
+        # Declarative rebuild from DB state picks up the new agent row.
+        from agentworks.ssh_config import sync_ssh_config
 
-                for ws in db.list_workspaces(vm_name=vm.name):
-                    add_to_workspace_group(vm, config, db, linux_user, ws.name, logger=None)
-                    db.insert_agent_grant(name, ws.name, "explicit")
+        sync_ssh_config(config, db)
 
-            # Refresh operator SSH config so `ssh <prefix><vm>--<agent>` works.
-            # Declarative rebuild from DB state picks up the new agent row.
-            from agentworks.ssh_config import sync_ssh_config
+        from agentworks.harness_setup.outcomes import setup_completion_suffix
 
-            sync_ssh_config(config, db)
-
-            from agentworks.harness_setup.outcomes import setup_completion_suffix
-
-            setup_suffix = setup_completion_suffix(native_setup)
-            output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user}){setup_suffix}")
-        return agent
+        setup_suffix = setup_completion_suffix(native_setup)
+        output.info(f"Agent '{name}' created on VM '{vm.name}' (user: {agent.linux_user}){setup_suffix}")
+    return agent

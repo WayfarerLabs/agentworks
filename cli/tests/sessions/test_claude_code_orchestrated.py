@@ -88,7 +88,9 @@ class _ClaudeGuest:
             and replace(request, env={}) == conversation_request(self._sid)
         ):
             self._events.append("detect")
-            return Result(Completed(0 if self._present else 1))
+            return Result(
+                Completed(0 if self._present else 1), f"AGW_CLAUDE_TRANSCRIPT={int(self._present)}\n".encode()
+            )
         return None
 
 

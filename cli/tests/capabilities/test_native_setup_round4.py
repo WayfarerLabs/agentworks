@@ -17,7 +17,6 @@ from agentworks.capabilities.harness_integration.kinds import HarnessIntegration
 from agentworks.capabilities.harness_integration.setup import UserSetupInvocation, VMSetupInvocation
 from agentworks.errors import ConfigError, ConnectivityError, ExternalError, StateError
 from agentworks.execution.oplog import OperationLogFile
-from agentworks.harness_setup.dispatch import run_setup
 from agentworks.harness_setup.model import NativeClaim, NativeSetupState, SetupRecord
 from agentworks.harness_setup.outcomes import SetupFailure, describe_setup_failures, sanitize_setup_diagnostic
 from agentworks.harness_setup.state import read_native_setup, write_native_setup
@@ -25,6 +24,7 @@ from agentworks.origin import Origin
 from tests.artifacts.test_routing import graph
 from tests.capabilities.test_native_setup_dispatch import setup_case as setup_case
 from tests.native_setup_fixtures import LocalFixtureAccount
+from tests.nested_locks_support import run_setup_held
 
 
 @pytest.mark.parametrize("failure_type", [ConfigError, StateError, ExternalError, ConnectivityError])
@@ -41,7 +41,7 @@ def test_each_recoverable_domain_error_keeps_claims_and_runs_sibling(setup_case,
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
+    state = run_setup_held(db, Mock(), inputs, invocation, failures=failures, operation="agent-reinit")
     assert events == [("first", False), ("second", False)]
     assert [item.reason for item in failures] == [reason]
     assert state.records[0].claims and not state.records[0].complete and state.records[1].complete
@@ -52,7 +52,7 @@ def test_unsupported_later_activation_cannot_mutate_earlier_integration(setup_ca
     monkeypatch.setattr(harness_integration_for("second"), "user_init", HarnessIntegration.user_init)
     failure_list: list[SetupFailure] = []
     with pytest.raises(StateError):
-        run_setup(db, Mock(), inputs, invocation, failures=failure_list, operation="agent-create")
+        run_setup_held(db, Mock(), inputs, invocation, failures=failure_list, operation="agent-create")
     assert events == [] and failure_list == []
     assert read_native_setup(db, "agent", "agent").records == ()
 
@@ -78,7 +78,7 @@ def test_retiring_legacy_unimplemented_facet_drops_only_effect_free_record(setup
     write_native_setup(db, "agent", "agent", NativeSetupState(records=(previous,)), operation="legacy")
     monkeypatch.setattr(harness_integration_for("first"), "user_init", HarnessIntegration.user_init)
     failures: list[SetupFailure] = []
-    state = run_setup(
+    state = run_setup_held(
         db, Mock(), replace(inputs, activations={}), invocation, failures=failures, operation="agent-reinit"
     )
     assert events == []
@@ -164,14 +164,16 @@ def routed_setup(db, tmp_path, monkeypatch):
 
     monkeypatch.setattr(ShellIntegration, "vm_init", vm_setup)
     monkeypatch.setattr(ShellIntegration, "user_init", user_setup)
-    run_setup(db, fixture.registry, fixture.owners["vm"], vm_call, failures=[], operation="vm-init")
+    run_setup_held(db, fixture.registry, fixture.owners["vm"], vm_call, failures=[], operation="vm-init")
     for component, call in calls.items():
-        run_setup(db, fixture.registry, fixture.owners[component], call, failures=[], operation="fixture-init")
+        run_setup_held(db, fixture.registry, fixture.owners[component], call, failures=[], operation="fixture-init")
     previous = read_native_setup(db, "vm", "vm").records[0]
     placements = {name: (Path(call.home) / "AGENTS.md").read_bytes() for name, call in calls.items()}
     fail_vm = True
     failures: list[SetupFailure] = []
-    state = run_setup(db, fixture.registry, fixture.owners["vm"], vm_call, failures=failures, operation="vm-reinit")
+    state = run_setup_held(
+        db, fixture.registry, fixture.owners["vm"], vm_call, failures=failures, operation="vm-reinit"
+    )
     return SimpleNamespace(
         fixture=fixture,
         calls=calls,
@@ -189,7 +191,7 @@ def test_failed_vm_dispatch_preserves_routes_for_same_vm_admin_and_later_agent(r
     assert failed.artifact_inputs == case.previous.artifact_inputs
     assert len(case.failures) == 1
     for component, call in case.calls.items():
-        state = run_setup(
+        state = run_setup_held(
             case.fixture.db,
             case.fixture.registry,
             case.fixture.owners[component],
@@ -234,7 +236,7 @@ def test_untrusted_large_failure_is_bounded_terminal_safe_and_redacted_before_tr
 
     monkeypatch.setattr(harness_integration_for("first"), "user_init", initialize)
     failures: list[SetupFailure] = []
-    state = run_setup(
+    state = run_setup_held(
         db,
         Mock(),
         inputs,
@@ -296,7 +298,7 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
         checkpoint=lambda claims: None,
     )
     failures: list[SetupFailure] = []
-    run_setup(
+    run_setup_held(
         fixture.db,
         fixture.registry,
         replace(fixture.owners["vm"], artifact_snapshot=next_snapshot),
@@ -322,7 +324,7 @@ def test_unavailable_capture_cannot_erase_placements_or_unresolved_deferrals(rou
             if item.component == component
         )
         failures = []
-        state = run_setup(
+        state = run_setup_held(
             fixture.db, fixture.registry, fixture.owners[component], call, failures=failures, operation="fixture-reinit"
         )
         record = next(item for item in state.records if item.component == component)
