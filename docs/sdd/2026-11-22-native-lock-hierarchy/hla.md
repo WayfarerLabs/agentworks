@@ -1,7 +1,8 @@
 # Native lock hierarchy: high-level architecture
 
-Status: draft. The [FRD](./frd.md) is accepted (2026-11-23); the [LLD](./lock-lld.md) carries the
-detail.
+Status: implemented and locked ([locked.md](./locked.md)). The [FRD](./frd.md) is accepted
+(2026-11-23); the [LLD](./lock-lld.md) carries the detail. "Today" below describes the code before
+this effort.
 
 ## Today
 

@@ -3,8 +3,9 @@
 <!-- cspell:ignore contextmanager contextvar ctypes wintypes inodes -->
 <!-- cspell:ignore argtypes restype LPOVERLAPPED dpkg Putzolu Traiger pids -->
 
-Status: draft. Builds on the accepted [FRD](./frd.md) and the [HLA](./hla.md). Code citations are
-`file:line` under `cli/agentworks/` at 27b215e9b unless a path says otherwise.
+Status: implemented and locked ([locked.md](./locked.md)). Builds on the accepted [FRD](./frd.md)
+and the [HLA](./hla.md). Code citations are `file:line` under `cli/agentworks/` at 27b215e9b unless
+a path says otherwise.
 
 This document fixes the primitive, the one sequence every operation follows, the holder records, the
 lock set of every command, the mechanism for each piece of shared state, the tests and the
