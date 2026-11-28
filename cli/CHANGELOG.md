@@ -2,6 +2,8 @@
 
 ## [0.20.0](https://github.com/WayfarerLabs/agentworks/compare/v0.19.0...v0.20.0) (2026-11-28)
 
+This version was tagged but never published to PyPI; its changes first ship in 0.20.1.
+
 
 ### ⚠ BREAKING CHANGES
 
