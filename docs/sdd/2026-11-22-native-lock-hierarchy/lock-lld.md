@@ -4,8 +4,8 @@
 <!-- cspell:ignore argtypes restype LPOVERLAPPED dpkg Putzolu Traiger pids -->
 
 Status: implemented and locked ([locked.md](./locked.md)). Builds on the accepted [FRD](./frd.md)
-and the [HLA](./hla.md). Code citations are `file:line` under `cli/agentworks/` at 27b215e9b unless
-a path says otherwise.
+and the [HLA](./hla.md). "Today" means the code before this effort. Code citations are `file:line`
+under `cli/agentworks/` at 27b215e9b unless a path says otherwise.
 
 This document fixes the primitive, the one sequence every operation follows, the holder records, the
 lock set of every command, the mechanism for each piece of shared state, the tests and the

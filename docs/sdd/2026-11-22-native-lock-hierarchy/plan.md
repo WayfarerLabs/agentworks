@@ -1,7 +1,6 @@
 # Native lock hierarchy: plan
 
-Status: complete and locked; see [locked.md](./locked.md). The design PR (#949), PR 1 (#972) and PR
-2 (#973) are merged and ship in 0.20.0.
+Status: locked; PR 2's last box did not run. See [locked.md](./locked.md).
 
 Three PRs: the design PR (#949) carrying the FRD, HLA, LLD and this plan, then two stacked
 implementation PRs, each green on its own. The first makes the shared-state fixes, guards and prompt
@@ -59,8 +58,7 @@ precedes its lock and each newly guarded mutator refuses while another operation
 - [x] Private review loop, three integration rounds from a Linux workstation against a live VM, and
       published feedback addressed.
 - [ ] Integration test from macOS and Windows workstations, concurrent account edits on a trixie
-      guest, and each FRD story driven concurrently on a live VM. Not performed; `locked.md` records
-      what covers it instead.
+      guest, and each FRD story driven concurrently on a live VM (#981).
 
 Done when PR 2 is merged with green CI on all platforms, the tester has driven each FRD story
 concurrently on a live VM from Linux, macOS and Windows workstations (two unrelated operations
