@@ -1,7 +1,7 @@
 # Files config
 
-Status: draft, awaiting the operator's acceptance. R3, R5 and R8 to R10 follow the operator's
-2026-11-25 and 2026-11-26 rulings.
+Status: draft, awaiting the operator's acceptance. R2, R3, R5 and R8 to R11 follow the operator's
+rulings of 2026-11-25 to 2026-11-28.
 
 ## Purpose
 
@@ -41,10 +41,14 @@ instance specs) also carry `files`. Each entry names a destination path and its 
 plaintext value, a declared secret, or a `source` in the forms agent artifacts already accept (a
 workstation file or a Git reference). Sessions carry no `files` in this effort.
 
-### R2. Applied at the declaring scope, with no rollup across scopes
+### R2. Applied immediately at the declaring scope, with no deferral
 
-A file belongs to the scope that declares it and is applied as that scope's identity when the scope
-is set up: create, reinit, and the scope's repair. Unlike `env`, files do not merge across scopes,
+A file belongs to the scope that declares it and is applied as that scope's identity during the
+scope's own setup: create, reinit, and the scope's repair. Files have no deferral: a file is never
+routed to a later scope. The setup applies its files as soon as the scope's place exists, before the
+rest of that setup, so a tool the setup installs or runs, and everything after it, finds them.
+
+Unlike `env`, which a session composes from the scopes around it, files do not merge across scopes,
 because a file is shared filesystem state rather than one process's view. Within a scope, templates
 and the instance spec merge entries by key, as `env` and agent artifacts do.
 
@@ -57,8 +61,12 @@ and the instance spec merge entries by key, as `env` and agent artifacts do.
 - **Admin and agent:** paths relative to that account's home, private to it. These are two scopes;
   they share only the shape of their place, as they share the harness `user` facet.
 
-A path that leaves its scope's place is refused when the declaration loads. Because each scope has
-its own place, two scopes cannot declare the same file.
+A path that leaves its scope's place is refused when the declaration loads. It is checked again
+where it lands: a workspace or account path must resolve, with links followed, strictly beneath that
+scope's root on the VM, as a harness tool home must beneath its account's home, and a VM path must
+not resolve into a home or a workspace root. A path that fails is refused, naming the path and the
+scope, and nothing is written. Because each scope has its own place, two scopes cannot declare the
+same file.
 
 ### R4. Agentworks changes only what it wrote
 
@@ -105,6 +113,14 @@ under the same name, is not a declaration change; applying the scope picks the n
 The applied set, its comparison with the declarations, and its warnings are not specific to files,
 so that `env` can later move onto the same model: an applied set of references, with secrets still
 resolved when they are used.
+
+### R11. Concurrent operations
+
+Applying a scope's files is part of that scope's setup, so it follows the native lock hierarchy as
+the setup does. An operation that changes the same scope refuses, or is refused, at once, naming its
+holder. Operations on unrelated scopes of the VM proceed together. No lock is held while a secret
+source prompts. If a scope's declarations, applied set or secret bindings change while the operation
+prompts, the operation refuses rather than apply what it read before.
 
 ## Out of scope
 
@@ -200,3 +216,40 @@ declarative move first" and wrote:]
 > then once that is demonstrated, we port env over.
 >
 > Does that make sense? Please push back if it doesn't.
+
+[Asked how changes should be applied and whether to accept the FRD, the operator wrote first:]
+
+> Further thoughts before answering questions.
+>
+> So I got to thinking about this, and I think we're overcomplicating this. The concept here is
+> deferral, which we introduced explicitly in the harness facets topic, which is where you can't
+> apply something at the scope that it's defined. Environment variables are inherently deferred,
+> right? That's just the way they work. They're always deferred to the session, which is why you
+> have this notion of, like, what are you getting from the higher scopes? I could be wrong, but I
+> don't think files should have any notion of deferral, which means they're always applied in the
+> scope that they're defined in. I think the only question is, are they applied immediately, or are
+> they, you know, are they applied at the end of the re-init or create or whatever? And I think the
+> honest answer is just to apply them immediately. That way they're there, they're available. If
+> they're installed for a tool, things that use that tool, the tool works, et cetera. So I think
+> this is probably simpler than we're making it and is inherently different than environment. But
+> think through that and let me know.
+
+[The lead's reading: in the harness-facets vocabulary, deferral belongs to facets, and what a
+session gets from the scopes around it is `env` layering. Files are applied by core, not by a facet,
+so they have neither: R2 applies them at their own scope, early in its setup. The question of how
+changes are applied was withdrawn with the effort parked, and returns in the HLA.]
+
+[Asked at the terminal whether the lock hierarchy and the files feature were both the lead's work,
+the operator wrote:]
+
+> Assuming so, it feels to me that waiting on the file feature until the lock is settled is the
+> right move. That said, I think once the lock is settled, the file feature naturally follows, yeah?
+
+### 2026-11-28
+
+[With the lock hierarchy merged for 0.20.0 (#949, #972, #973), the operator directed:]
+
+> Please update the files work based on where the lock stuff landed.
+
+[The lead's reading: R11 is the lock hierarchy's consequence for files, and R3's landing check
+reuses the confinement harness tool homes already have.]
