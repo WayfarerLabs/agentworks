@@ -17,6 +17,11 @@ Each ``*_fields`` function names those fields for one row and returns
 ``None`` for a missing row, so presence is compared too. Only identity and
 placement are compared, never whole rows: timestamps and recorded pids
 change under ordinary use.
+
+VMs and sessions carry an identity (``vm_uuid``, ``session_uuid``) that the
+compare includes. Workspaces, agents and consoles have none, so their fields
+bind the named slot: a replacement under the same name with the same fields
+passes, by design, since the operator confirmed the name.
 """
 
 from __future__ import annotations

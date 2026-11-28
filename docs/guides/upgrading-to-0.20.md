@@ -4,9 +4,10 @@ Agentworks 0.20 reaches every VM through one new SSH connection layer, which car
 environment included, on the OpenSSH client's standard input and verifies every VM against a
 host-key store of its own instead of trusting whatever key it sees first. It also adds stored
 runtime intent for VMs, sessions and named consoles, and runs tmux clients aimed at an agent
-session's server as that agent. Third-party VM platform plugins move to vm-platform contract version
-2, and third-party harness integrations, Git credential providers and secret backends to new
-contract versions as well.
+session's server as that agent. Commands on unrelated parts of one VM now run together, each locking
+only what it changes ([Operations lock what they change](#operations-lock-what-they-change)).
+Third-party VM platform plugins move to vm-platform contract version 2, and third-party harness
+integrations, Git credential providers and secret backends to new contract versions as well.
 
 ## Upgrade steps
 
