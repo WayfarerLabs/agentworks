@@ -10,8 +10,8 @@
 ## What shipped
 
 The `native_locks` package replaced the single per-VM native mutation guard, as the HLA and LLD
-describe. The LLD was kept in step with the code through #973's final head, `3182811f1`. Two pieces
-of PR 2 have no plan box of their own:
+describe. The LLD was kept in step with the code through #973's final head, `3182811f1`, except for
+the whole-row console compares in #978. Two pieces of PR 2 have no plan box of their own:
 
 - **Restore hints:** a refusal after recorded intent says how to restore the old intent.
 - **Tool homes:** a harness tool home must resolve beneath the account's physical HOME.
@@ -43,9 +43,9 @@ No permanent doc refers to this directory.
   through `LockFileEx`. There is no macOS job.
 
 **Not validated.** PR 2's last plan box and the live checks in LLD section 6 did not run. The
-operator merged #973 without them, on the tester's merge-as-is recommendation. One gap backs a
-design assumption: that shadow-utils serializes concurrent account edits on trixie, which no run has
-observed. The fixed races were never re-run end to end on a live VM.
+operator merged #973 without them, on the tester's merge-as-is recommendation. Two gaps back a
+design assumption: that shadow-utils serializes concurrent account edits and group-member removals,
+which no run has observed on trixie. The fixed races were never re-run end to end on a live VM.
 [#981](https://github.com/WayfarerLabs/agentworks/issues/981) tracks all of these.
 
 ## Follow-ups filed

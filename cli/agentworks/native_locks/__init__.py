@@ -34,23 +34,31 @@ Every native mutation locks what it changes. The rules:
   ``prompts=True``, which show a notice before their first prompt; a prompt
   under any other held set raises (:func:`prompt_notice`).
 
-Every command that changes native state runs one sequence, whose steps code
-comments cite by number:
+Every command that changes native state, except the runtime families below,
+runs one sequence, whose steps code comments cite by number:
 
 1. **Read** the rows that build the whole request, target choosers included.
 2. **Probe** the request (:func:`probe_locks`), without its ``path``
    entities, so a conflict fails before any prompt or boot.
 3. **Confirm early**: confirmations that need no guest observation.
-4. **Gate**, when the command needs the VM running: resolve the gate secrets
-   and observe the provider, boot a stopped VM under a brief vm exclusive,
-   then admit the ``vm_active`` hold under a brief vm shared.
+4. **Gate**, when the command needs the VM running and it is not confirmed
+   active: resolve the gate secrets and observe the provider, boot a stopped
+   VM under a brief vm exclusive, then admit the ``vm_active`` hold under a
+   brief vm shared.
 5. **Prepare** with nothing locked: preflight, read-only guest probes,
    secret resolution, and the confirmations that render probe results.
-6. **Acquire** the request once, with the vm shared.
+6. **Acquire** the request once, with the vm shared unless the command
+   changes the VM itself.
 7. **Re-check** under the set what steps 1, 4 and 5 read
    (:mod:`agentworks.recheck`).
 8. **Run** the body on the VM row step 7 compared; nested operations call
    :meth:`NativeLockSet.require`.
+
+The runtime families (session and console start, stop, restart and
+reconcile, and ``vm reconcile``) record intent under a brief
+hold of their own set before step 4, and take their final sets, which may
+prompt, only once every family is prepared. The orchestration README
+describes them.
 
 The vm level keeps the file and byte every release since v0.19.0 locks
 exclusive, so an older agw and this one exclude each other. The OS releases
