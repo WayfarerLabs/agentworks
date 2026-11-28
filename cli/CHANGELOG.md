@@ -2,10 +2,7 @@
 
 ## [0.20.1](https://github.com/WayfarerLabs/agentworks/compare/v0.20.0...v0.20.1) (2026-11-28)
 
-
-### Documentation
-
-* **changelog:** say 0.20.0 never reached PyPI ([404efc1](https://github.com/WayfarerLabs/agentworks/commit/404efc181da5ea10fc8c05019715c5a2278044bf))
+This is the first published 0.20 release. 0.20.0 was tagged but never reached PyPI, so every change since 0.19.0 is listed under [0.20.0](https://github.com/WayfarerLabs/agentworks/releases/tag/v0.20.0), including its breaking changes.
 
 ## [0.20.0](https://github.com/WayfarerLabs/agentworks/compare/v0.19.0...v0.20.0) (2026-11-28)
 
